@@ -4,48 +4,42 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 
 ## Features
 
-### Implemented
-
 | Feature | Description |
 |---------|-------------|
-| Diagnostics | Shows compiler errors and warnings from `compactc` on save |
-| Document Sync | Tracks file changes with incremental updates |
-| Completion | Keywords, built-in types, snippets, and cross-project symbols via imports |
-| Formatting | Format document using `format-compact` |
-| Document Symbols | Outline view of circuits, structs, enums, modules, etc. |
-| Folding Ranges | Code folding for blocks, functions, control flow |
-| Hover | Documentation for keywords, types, and symbols (including imported) |
-| Go to Definition | Navigate to symbol definitions (same file and imported files) |
-| Signature Help | Function parameter hints (including imported functions) |
+| **Diagnostics** | Real-time syntax errors + compiler errors on save |
+| **Semantic Tokens** | Rich syntax highlighting (functions, types, parameters, etc.) |
+| **Completion** | Keywords, types, snippets, local and imported symbols |
+| **Hover** | Documentation for keywords, types, and symbols |
+| **Go to Definition** | Jump to symbol definitions (local and imported) |
+| **Signature Help** | Parameter hints while typing function calls |
+| **Document Symbols** | Outline view (circuits, structs, enums, modules) |
+| **Formatting** | Code formatting via `format-compact` |
+| **Folding Ranges** | Code folding for blocks and functions |
+| **Cross-file Errors** | Errors propagate to dependent files on save |
 
 ### Cross-Project Support
 
-The LSP supports Compact's import system with prefixes:
+Works with Compact's import system:
 
 ```compact
 import "./Utils" prefix Utils_;
 
-// These all work cross-project:
-// - Completion: type "Utils_" to see Utils_add
-// - Hover: hover on Utils_add to see signature
-// - Go to Definition: jump to add() in Utils.compact
-// - Signature Help: see (a: Field, b: Field) while typing
-Utils_add(5, 5);
+Utils_add(5, 5);  // Completion, hover, go-to-def, signature help all work
 ```
 
 ### Roadmap
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Semantic Tokens | Planned | Rich syntax highlighting via LSP |
-| Find References | Planned | Find all usages of a symbol |
-| Rename | Planned | Rename symbols across files |
-| Code Actions | Planned | Quick fixes and refactoring |
+| Feature | Status |
+|---------|--------|
+| Find References | Planned |
+| Rename | Planned |
+| Code Actions | Planned |
 
 ## Requirements
 
 - Rust toolchain (for building)
-- `compactc` compiler (from Midnight devtools)
+- `compactc` compiler (for diagnostics)
+- `format-compact` (optional, for formatting)
 
 ## Building
 
@@ -53,13 +47,25 @@ Utils_add(5, 5);
 cargo build --release
 ```
 
-The binary will be at `target/release/compact-lsp`.
+Binary: `target/release/compact-lsp`
+
+## Compiler Location
+
+The LSP auto-detects `compactc.bin`:
+1. `COMPACT_COMPILER` environment variable
+2. `~/compactc/compactc.bin`
+3. `compactc.bin` in PATH
+
+## Related Projects
+
+- [compact.vim](../compact.vim) - Vim/Neovim syntax highlighting
+- [tree-sitter-compact](../compact-tree-sitter) - Tree-sitter grammar
 
 ## Neovim Setup
 
 ### 1. Create LSP config
 
-Add to `~/.config/nvim/lua/core/lsp/configs/compact_lsp.lua`:
+Create `~/.config/nvim/lua/lsp/compact.lua`:
 
 ```lua
 return {
@@ -71,23 +77,21 @@ return {
 
 ### 2. Register filetype and enable LSP
 
-Add to your LSP configuration:
+Add to your Neovim config:
 
 ```lua
--- Register .compact file extension
+-- Register .compact filetype
 vim.filetype.add({
-    extension = {
-        compact = "compact",
-    },
+    extension = { compact = "compact" },
 })
 
--- Load and register compact_lsp
-local compact_config = require("core.lsp.configs.compact_lsp")
+-- Load and register compact LSP
+local compact_config = require("lsp.compact")
 vim.lsp.config("compact_lsp", compact_config)
 
--- Enable for .compact files
+-- Auto-enable for .compact files
 vim.api.nvim_create_autocmd("FileType", {
-    pattern = { "compact" },
+    pattern = "compact",
     callback = function()
         vim.lsp.enable("compact_lsp")
     end,
@@ -101,17 +105,20 @@ Open a `.compact` file and run:
 :LspInfo
 ```
 
-## Compiler Location
+### Optional: Enable semantic highlighting
 
-The LSP auto-detects `compactc.bin` in this order:
-1. `COMPACT_COMPILER` environment variable
-2. `~/compactc/compactc.bin`
-3. `compactc.bin` in PATH
+Add to your config to use LSP semantic tokens for highlighting:
 
-## Related Projects
-
-- [compact.vim](../compact.vim) - Vim/Neovim syntax highlighting and filetype support
-- [tree-sitter-compact](https://github.com/midnight-ntwrk/tree-sitter-compact) - Tree-sitter grammar for Compact
+```lua
+vim.api.nvim_create_autocmd("LspAttach", {
+    callback = function(args)
+        local client = vim.lsp.get_client_by_id(args.data.client_id)
+        if client and client.server_capabilities.semanticTokensProvider then
+            vim.lsp.semantic_tokens.start(args.buf, args.data.client_id)
+        end
+    end,
+})
+```
 
 ## License
 
