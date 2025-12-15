@@ -10,13 +10,28 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 |---------|-------------|
 | Diagnostics | Shows compiler errors and warnings from `compactc` on save |
 | Document Sync | Tracks file changes with incremental updates |
-| Completion | Keywords, built-in types, and snippet templates |
+| Completion | Keywords, built-in types, snippets, and cross-project symbols via imports |
 | Formatting | Format document using `format-compact` |
 | Document Symbols | Outline view of circuits, structs, enums, modules, etc. |
 | Folding Ranges | Code folding for blocks, functions, control flow |
-| Hover | Documentation for keywords, types, and symbol signatures |
-| Go to Definition | Navigate to symbol definitions (same file) |
-| Signature Help | Function parameter hints while typing |
+| Hover | Documentation for keywords, types, and symbols (including imported) |
+| Go to Definition | Navigate to symbol definitions (same file and imported files) |
+| Signature Help | Function parameter hints (including imported functions) |
+
+### Cross-Project Support
+
+The LSP supports Compact's import system with prefixes:
+
+```compact
+import "./Utils" prefix Utils_;
+
+// These all work cross-project:
+// - Completion: type "Utils_" to see Utils_add
+// - Hover: hover on Utils_add to see signature
+// - Go to Definition: jump to add() in Utils.compact
+// - Signature Help: see (a: Field, b: Field) while typing
+Utils_add(5, 5);
+```
 
 ### Roadmap
 

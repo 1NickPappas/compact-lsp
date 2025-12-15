@@ -50,15 +50,22 @@ vim.api.nvim_create_autocmd("FileType", {
 2. Check connection: `:LspInfo`
 3. View logs: `:LspLog`
 
-## Features (Phase 1)
+## Features
 
-- Diagnostics from `compactc` compiler on save
-- Document synchronization
+- **Diagnostics** - Compiler errors and warnings on save
+- **Completion** - Keywords, types, snippets, and cross-project symbols
+- **Hover** - Documentation for keywords, types, and symbols
+- **Go to Definition** - Navigate to definitions (same file and imports)
+- **Signature Help** - Parameter hints while typing function calls
+- **Document Symbols** - Outline view (circuits, structs, enums, etc.)
+- **Folding** - Code folding for blocks and functions
+- **Formatting** - Format with `format-compact`
 
 ## Keymaps
 
 Standard LSP keymaps apply:
-- `gd` - Go to definition (future)
-- `K` - Hover info (future)
+- `gd` - Go to definition
+- `K` - Hover documentation
 - `[d` / `]d` - Navigate diagnostics
 - `<leader>ld` - Show diagnostic float
+- `<C-Space>` - Trigger completion (if configured)
