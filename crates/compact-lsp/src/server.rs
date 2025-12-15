@@ -20,7 +20,7 @@ use lsp_types::*;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::{Client, LanguageServer};
 
-use compact_analyzer::DiagnosticEngine;
+use compact_analyzer::{DiagnosticEngine, FormatterEngine};
 
 /// A document we're tracking (an open file in the editor).
 #[derive(Debug, Clone)]
@@ -42,6 +42,7 @@ pub struct Document {
 /// - `client`: Used to send notifications TO the editor (e.g., diagnostics)
 /// - `documents`: Map of open files (Uri -> Document)
 /// - `diagnostic_engine`: Wraps the compactc compiler
+/// - `formatter_engine`: Wraps the format-compact binary
 pub struct CompactLanguageServer {
     /// The LSP client - used to send messages TO the editor.
     /// For example, we use this to publish diagnostics.
@@ -54,12 +55,16 @@ pub struct CompactLanguageServer {
 
     /// The diagnostic engine that wraps compactc.
     diagnostic_engine: Arc<DiagnosticEngine>,
+
+    /// The formatter engine that wraps format-compact.
+    formatter_engine: Arc<FormatterEngine>,
 }
 
 impl CompactLanguageServer {
     /// Create a new language server instance.
     pub fn new(client: Client) -> Self {
         let diagnostic_engine = DiagnosticEngine::new();
+        let formatter_engine = FormatterEngine::new();
 
         if diagnostic_engine.is_available() {
             tracing::info!("Compact compiler found");
@@ -67,10 +72,17 @@ impl CompactLanguageServer {
             tracing::warn!("Compact compiler not found - diagnostics will be unavailable");
         }
 
+        if formatter_engine.is_available() {
+            tracing::info!("Compact formatter found");
+        } else {
+            tracing::warn!("Compact formatter not found - formatting will be unavailable");
+        }
+
         Self {
             client,
             documents: Arc::new(DashMap::new()),
             diagnostic_engine: Arc::new(diagnostic_engine),
+            formatter_engine: Arc::new(formatter_engine),
         }
     }
 
@@ -145,10 +157,11 @@ impl LanguageServer for CompactLanguageServer {
                     resolve_provider: Some(false),
                     ..Default::default()
                 }),
+                // Document formatting provider
+                document_formatting_provider: Some(OneOf::Left(true)),
                 // We'll add more capabilities as we implement features:
                 // - hover_provider: for hover information
                 // - definition_provider: for go-to-definition
-                // - document_formatting_provider: for format on save
                 ..Default::default()
             },
             // Server identification
@@ -488,5 +501,68 @@ impl LanguageServer for CompactLanguageServer {
 
         tracing::debug!("Returning {} completion items", items.len());
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    /// Handle `textDocument/formatting` request.
+    ///
+    /// Formats the entire document using the format-compact binary.
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri.to_string();
+        tracing::debug!("Formatting requested for: {}", uri);
+
+        // Get the document content
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Run the formatter
+        let formatted = match self.formatter_engine.format(&content).await {
+            Ok(formatted) => formatted,
+            Err(e) => {
+                tracing::warn!("Formatting failed: {}", e);
+                // Show error to user
+                self.client
+                    .show_message(MessageType::ERROR, format!("Formatting failed: {}", e))
+                    .await;
+                return Ok(None);
+            }
+        };
+
+        // If content is unchanged, return empty edits
+        if formatted == content {
+            tracing::debug!("Content unchanged after formatting");
+            return Ok(Some(vec![]));
+        }
+
+        // Calculate the range of the entire document
+        let line_count = content.lines().count();
+        let last_line = content.lines().last().unwrap_or("");
+
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: line_count as u32,
+                character: last_line.len() as u32,
+            },
+        };
+
+        // Return a single edit that replaces the entire document
+        let edit = TextEdit {
+            range,
+            new_text: formatted,
+        };
+
+        tracing::debug!("Formatting complete");
+        Ok(Some(vec![edit]))
     }
 }

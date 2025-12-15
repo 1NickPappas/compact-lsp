@@ -11,12 +11,12 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 | Diagnostics | Shows compiler errors and warnings from `compactc` on save |
 | Document Sync | Tracks file changes with incremental updates |
 | Completion | Keywords, built-in types, and snippet templates |
+| Formatting | Format document using `format-compact` |
 
 ### Roadmap
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Formatting | Planned | Format on save (requires format-compact) |
 | Document Symbols | Planned | Outline view of functions, types, etc. |
 | Semantic Tokens | Planned | Rich syntax highlighting via LSP |
 | Hover | Planned | Type info and documentation on hover |
