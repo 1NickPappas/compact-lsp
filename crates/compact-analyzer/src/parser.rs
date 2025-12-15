@@ -598,7 +598,8 @@ impl ParserEngine {
         let mut params = Vec::new();
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "arg" {
+            // Compact uses "parg" for circuit parameters, "arg" for struct fields
+            if child.kind() == "parg" || child.kind() == "arg" {
                 let param_text = self.node_text(child, source);
                 params.push(param_text);
             }
