@@ -81,11 +81,99 @@ impl DiagnosticEngine {
 
     /// Run diagnostics on a file and return LSP Diagnostic objects.
     ///
-    /// This is a placeholder - we'll implement the full logic in Step 5.
-    pub async fn diagnose(&self, _uri: &str, _content: &str) -> Vec<Diagnostic> {
-        // TODO: Implement in Step 5
-        // For now, return empty diagnostics
-        Vec::new()
+    /// # How it works
+    ///
+    /// 1. Extract file path from URI (file:///path/to/file.compact)
+    /// 2. Create temp directory for compiler output
+    /// 3. Run: `compactc.bin --vscode <file> <temp_dir>`
+    /// 4. Parse stderr for error messages
+    /// 5. Return LSP Diagnostic objects
+    pub async fn diagnose(&self, uri: &str, _content: &str) -> Vec<Diagnostic> {
+        // Check if compiler is available
+        let compiler_path = match &self.compiler_path {
+            Some(path) => path,
+            None => {
+                tracing::warn!("Compiler not available, skipping diagnostics");
+                return Vec::new();
+            }
+        };
+
+        // Extract file path from URI (e.g., "file:///path/to/file.compact" -> "/path/to/file.compact")
+        let file_path = match uri.strip_prefix("file://") {
+            Some(path) => path,
+            None => {
+                tracing::warn!("Invalid URI format: {}", uri);
+                return Vec::new();
+            }
+        };
+
+        // Check if file exists
+        if !std::path::Path::new(file_path).exists() {
+            tracing::warn!("File does not exist: {}", file_path);
+            return Vec::new();
+        }
+
+        // Create temp directory for compiler output
+        let temp_dir = match tempfile::tempdir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::error!("Failed to create temp directory: {}", e);
+                return Vec::new();
+            }
+        };
+
+        tracing::debug!(
+            "Running compiler: {} --vscode {} {}",
+            compiler_path,
+            file_path,
+            temp_dir.path().display()
+        );
+
+        // Run the compiler
+        // compactc.bin --vscode <source-file> <output-dir>
+        let output = match tokio::process::Command::new(compiler_path)
+            .arg("--vscode")
+            .arg("--skip-zk") // Skip ZK key generation for faster diagnostics
+            .arg(file_path)
+            .arg(temp_dir.path())
+            .output()
+            .await
+        {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::error!("Failed to run compiler: {}", e);
+                return Vec::new();
+            }
+        };
+
+        // Parse stderr for errors
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        tracing::debug!("Compiler exit code: {:?}", output.status.code());
+        if !stderr.is_empty() {
+            tracing::debug!("Compiler stderr: {}", stderr);
+        }
+        if !stdout.is_empty() {
+            tracing::trace!("Compiler stdout: {}", stdout);
+        }
+
+        // Collect diagnostics from both stderr and stdout
+        let mut diagnostics = Vec::new();
+
+        for line in stderr.lines().chain(stdout.lines()) {
+            if let Some(diag) = parse_error_line(line) {
+                diagnostics.push(diag);
+            }
+        }
+
+        tracing::info!(
+            "Diagnostics for {}: {} error(s)",
+            file_path,
+            diagnostics.len()
+        );
+
+        diagnostics
     }
 }
 
@@ -100,7 +188,6 @@ impl Default for DiagnosticEngine {
 /// Format: `Exception: <filename> line <line> char <col>: <message>`
 ///
 /// Returns None if the line doesn't match the expected format.
-#[allow(dead_code)] // Will be used in Step 5
 fn parse_error_line(line: &str) -> Option<Diagnostic> {
     // Regex pattern for compiler errors
     let re = regex::Regex::new(
