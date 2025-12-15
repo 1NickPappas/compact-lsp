@@ -176,6 +176,12 @@ impl LanguageServer for CompactLanguageServer {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 // Go to definition provider
                 definition_provider: Some(OneOf::Left(true)),
+                // Signature help provider
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
             // Server identification
@@ -718,6 +724,71 @@ impl LanguageServer for CompactLanguageServer {
             }
             None => {
                 tracing::debug!("No definition found");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Handle `textDocument/signatureHelp` request.
+    ///
+    /// Shows function signature while typing arguments.
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let position = params.text_document_position_params.position;
+        tracing::debug!("Signature help requested for: {} at {:?}", uri, position);
+
+        // Get the document content
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Get signature info from parser
+        let sig_info = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.signature_help(&content, position.line, position.character)
+        };
+
+        match sig_info {
+            Some(info) => {
+                tracing::debug!("Signature help found: {}", info.label);
+
+                // Convert parameters to LSP format
+                let parameters: Vec<ParameterInformation> = info
+                    .parameters
+                    .iter()
+                    .map(|p| ParameterInformation {
+                        label: ParameterLabel::Simple(p.label.clone()),
+                        documentation: None,
+                    })
+                    .collect();
+
+                let signature = SignatureInformation {
+                    label: info.label,
+                    documentation: info.documentation.map(|d| {
+                        Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: d,
+                        })
+                    }),
+                    parameters: Some(parameters),
+                    active_parameter: Some(info.active_parameter),
+                };
+
+                Ok(Some(SignatureHelp {
+                    signatures: vec![signature],
+                    active_signature: Some(0),
+                    active_parameter: Some(info.active_parameter),
+                }))
+            }
+            None => {
+                tracing::debug!("No signature help at position");
                 Ok(None)
             }
         }

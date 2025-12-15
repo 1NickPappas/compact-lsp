@@ -28,6 +28,26 @@ pub struct DefinitionLocation {
     /// The range of just the symbol name (for selection).
     pub selection_range: Range,
 }
+
+/// Parameter information for signature help.
+#[derive(Debug, Clone)]
+pub struct ParameterInfo {
+    /// Parameter label (e.g., "a: Field").
+    pub label: String,
+}
+
+/// Signature information result.
+#[derive(Debug, Clone)]
+pub struct SignatureInfo {
+    /// The full signature label (e.g., "circuit add(a: Field, b: Field): Field").
+    pub label: String,
+    /// Documentation for the signature.
+    pub documentation: Option<String>,
+    /// Parameters with their labels.
+    pub parameters: Vec<ParameterInfo>,
+    /// The index of the active parameter (0-based).
+    pub active_parameter: u32,
+}
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -566,7 +586,8 @@ impl ParserEngine {
 
         // Check if this node is a definition with matching name
         let def_name = match kind {
-            "cdefn" | "edecl" | "wdecl" => self.get_field_text(node, "id", source),
+            // Circuit definitions use "function_name" node
+            "cdefn" | "edecl" | "wdecl" => self.get_function_name(node, source),
             "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => self.get_field_text(node, "name", source),
             _ => None,
         };
@@ -666,6 +687,272 @@ impl ParserEngine {
         }?;
 
         Some(self.node_range(name_node))
+    }
+
+    /// Get signature help for a function call at the given position.
+    ///
+    /// Returns signature information if the cursor is inside a function call.
+    pub fn signature_help(&mut self, source: &str, line: u32, character: u32) -> Option<SignatureInfo> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+
+        // Convert LSP position to tree-sitter point
+        let point = tree_sitter::Point {
+            row: line as usize,
+            column: character as usize,
+        };
+
+        // Find the node at this position
+        let node = root.descendant_for_point_range(point, point)?;
+
+        // Walk up to find a function call expression
+        let (call_node, func_name) = self.find_enclosing_call(node, source_bytes, point)?;
+
+        // Count which parameter we're in (count commas before cursor)
+        let active_param = self.count_active_parameter(call_node, point, source_bytes);
+
+        // Find the function definition
+        let def_node = self.find_definition_node(&func_name, root, source_bytes)?;
+
+        // Build signature info
+        self.build_signature_info(def_node, source_bytes, active_param)
+    }
+
+    /// Find an enclosing function call expression.
+    fn find_enclosing_call<'a>(&self, node: Node<'a>, source: &[u8], cursor_point: tree_sitter::Point) -> Option<(Node<'a>, String)> {
+        let mut current = Some(node);
+
+        while let Some(n) = current {
+            let kind = n.kind();
+
+            // Check for function call patterns (Compact uses function_call_term)
+            if kind == "function_call_term" {
+                if let Some(name) = self.get_call_function_name(n, source) {
+                    return Some((n, name));
+                }
+            }
+
+            // For blocks, search children for ERROR nodes with function calls
+            // This handles incomplete code while typing
+            if kind == "block" {
+                if let Some((error_node, name)) = self.find_error_call_in_block(n, source, cursor_point) {
+                    return Some((error_node, name));
+                }
+            }
+
+            current = n.parent();
+        }
+
+        None
+    }
+
+    /// Search a block for ERROR nodes containing function calls before cursor.
+    fn find_error_call_in_block<'a>(&self, block: Node<'a>, source: &[u8], cursor_point: tree_sitter::Point) -> Option<(Node<'a>, String)> {
+        let mut cursor = block.walk();
+
+        for child in block.children(&mut cursor) {
+            // Look for ERROR nodes or stmt containing ERROR
+            if let Some(result) = self.find_error_call_recursive(child, source, cursor_point) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
+
+    /// Recursively search for ERROR nodes with function calls.
+    fn find_error_call_recursive<'a>(&self, node: Node<'a>, source: &[u8], cursor_point: tree_sitter::Point) -> Option<(Node<'a>, String)> {
+        let kind = node.kind();
+
+        if kind == "ERROR" {
+            // Check if this ERROR has a function call and the cursor is after the opening paren
+            if let Some(name) = self.get_call_function_name(node, source) {
+                // Check if cursor is within or after this error node's range
+                let start = node.start_position();
+                let end = node.end_position();
+
+                if cursor_point.row > start.row ||
+                   (cursor_point.row == start.row && cursor_point.column >= start.column) {
+                    if cursor_point.row < end.row + 1 ||
+                       (cursor_point.row == end.row && cursor_point.column <= end.column + 10) {
+                        return Some((node, name));
+                    }
+                }
+            }
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(result) = self.find_error_call_recursive(child, source, cursor_point) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
+
+    /// Get the function name from a call expression.
+    fn get_call_function_name(&self, node: Node, source: &[u8]) -> Option<String> {
+        let kind = node.kind();
+
+        // Handle both complete function_call_term and incomplete ERROR nodes
+        if kind == "function_call_term" || kind == "ERROR" {
+            // Look for a "fun" child containing "id"
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "fun" {
+                    // Get the id inside fun
+                    let mut inner_cursor = child.walk();
+                    for inner_child in child.children(&mut inner_cursor) {
+                        if inner_child.kind() == "id" {
+                            return Some(self.node_text(inner_child, source));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Count which parameter the cursor is in (0-based).
+    fn count_active_parameter(&self, call_node: Node, cursor_point: tree_sitter::Point, source: &[u8]) -> u32 {
+        let mut comma_count = 0;
+        let mut in_args = false;
+
+        let mut cursor = call_node.walk();
+        for child in call_node.children(&mut cursor) {
+            let child_kind = child.kind();
+
+            // Start counting after opening paren
+            if child_kind == "(" {
+                in_args = true;
+                continue;
+            }
+
+            // Stop at closing paren
+            if child_kind == ")" {
+                break;
+            }
+
+            if in_args && child_kind == "," {
+                // Only count commas before the cursor
+                if child.start_position().row < cursor_point.row
+                    || (child.start_position().row == cursor_point.row
+                        && child.start_position().column < cursor_point.column)
+                {
+                    comma_count += 1;
+                }
+            }
+        }
+
+        // Also check inside nested argument nodes
+        let mut nested_cursor = call_node.walk();
+        for child in call_node.children(&mut nested_cursor) {
+            if child.kind() == "arguments" || child.kind() == "call_args" {
+                comma_count += self.count_commas_before_cursor(child, cursor_point, source);
+            }
+        }
+
+        comma_count
+    }
+
+    /// Count commas before cursor position in an arguments node.
+    fn count_commas_before_cursor(&self, args_node: Node, cursor_point: tree_sitter::Point, _source: &[u8]) -> u32 {
+        let mut count = 0;
+        let mut cursor = args_node.walk();
+
+        for child in args_node.children(&mut cursor) {
+            if child.kind() == "," {
+                if child.start_position().row < cursor_point.row
+                    || (child.start_position().row == cursor_point.row
+                        && child.start_position().column < cursor_point.column)
+                {
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
+    /// Build SignatureInfo from a definition node.
+    fn build_signature_info(&self, def_node: Node, source: &[u8], active_param: u32) -> Option<SignatureInfo> {
+        let kind = def_node.kind();
+
+        let (prefix, name, doc) = match kind {
+            "cdefn" => {
+                // cdefn uses "function_name" for the circuit name
+                let name = self.get_function_name(def_node, source)?;
+                ("circuit", name, "Circuit function")
+            }
+            "edecl" => {
+                let name = self.get_function_name(def_node, source)?;
+                ("circuit", name, "External circuit")
+            }
+            "wdecl" => {
+                let name = self.get_function_name(def_node, source)?;
+                ("witness", name, "Witness function")
+            }
+            _ => return None,
+        };
+
+        // Extract parameters
+        let params = self.extract_param_infos(def_node, source);
+
+        // Get return type
+        let return_type = self.get_type_text(def_node, source).unwrap_or_default();
+
+        // Build signature label
+        let params_str: Vec<_> = params.iter().map(|p| p.label.as_str()).collect();
+        let label = format!("{} {}({}): {}", prefix, name, params_str.join(", "), return_type);
+
+        Some(SignatureInfo {
+            label,
+            documentation: Some(doc.to_string()),
+            parameters: params,
+            active_parameter: active_param,
+        })
+    }
+
+    /// Get function name from a cdefn/edecl/wdecl node.
+    fn get_function_name(&self, node: Node, source: &[u8]) -> Option<String> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "function_name" {
+                return Some(self.node_text(child, source));
+            }
+        }
+        None
+    }
+
+    /// Get return type from a cdefn/edecl/wdecl node.
+    fn get_type_text(&self, node: Node, source: &[u8]) -> Option<String> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "type" {
+                return Some(self.node_text(child, source));
+            }
+        }
+        None
+    }
+
+    /// Extract parameter info for signature help.
+    fn extract_param_infos(&self, node: Node, source: &[u8]) -> Vec<ParameterInfo> {
+        let mut params = Vec::new();
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            // Compact uses "parg" for circuit parameters
+            if child.kind() == "parg" || child.kind() == "arg" {
+                let param_text = self.node_text(child, source);
+                params.push(ParameterInfo { label: param_text });
+            }
+        }
+
+        params
     }
 }
 
@@ -779,5 +1066,59 @@ circuit make_point(): Point { return Point { x: 0, y: 0 }; }"#;
         let loc = loc.unwrap();
         // Should point to line 0 where Point is defined
         assert_eq!(loc.selection_range.start.line, 0);
+    }
+
+    #[test]
+    fn test_signature_help() {
+        let mut parser = ParserEngine::new();
+        let source = r#"circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+circuit main(): Field {
+    return add(1, 2);
+}"#;
+        // Position inside add() call - after the opening paren (line 5, col 15)
+        let info = parser.signature_help(source, 5, 15);
+        assert!(info.is_some(), "Should find signature help");
+        let info = info.unwrap();
+        assert!(info.label.contains("add"), "Label should contain function name");
+        assert_eq!(info.parameters.len(), 2, "Should have 2 parameters");
+        assert_eq!(info.active_parameter, 0, "First parameter should be active");
+    }
+
+    #[test]
+    fn test_signature_help_second_param() {
+        let mut parser = ParserEngine::new();
+        let source = r#"circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+circuit main(): Field {
+    return add(1, 2);
+}"#;
+        // Position after the comma (line 5, col 18)
+        let info = parser.signature_help(source, 5, 18);
+        assert!(info.is_some(), "Should find signature help");
+        let info = info.unwrap();
+        assert_eq!(info.active_parameter, 1, "Second parameter should be active");
+    }
+
+    #[test]
+    fn test_signature_help_incomplete() {
+        let mut parser = ParserEngine::new();
+        // Incomplete code - user is still typing
+        let source = r#"circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+circuit main(): Field {
+    return add(
+}"#;
+        // Position right after opening paren (line 5, col 15)
+        let info = parser.signature_help(source, 5, 15);
+        assert!(info.is_some(), "Should find signature help for incomplete call");
+        let info = info.unwrap();
+        assert!(info.label.contains("add"), "Label should contain function name");
     }
 }
