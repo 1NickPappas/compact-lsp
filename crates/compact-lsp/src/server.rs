@@ -174,8 +174,8 @@ impl LanguageServer for CompactLanguageServer {
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 // Hover provider for documentation and type info
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
-                // We'll add more capabilities as we implement features:
-                // - definition_provider: for go-to-definition
+                // Go to definition provider
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             // Server identification
@@ -677,6 +677,47 @@ impl LanguageServer for CompactLanguageServer {
             }
             None => {
                 tracing::debug!("No hover info at position");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Handle `textDocument/definition` request.
+    ///
+    /// Returns the location of the definition for the symbol at the cursor.
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri.clone();
+        let position = params.text_document_position_params.position;
+        tracing::debug!("Go to definition requested for: {:?} at {:?}", uri, position);
+
+        // Get the document content
+        let content = match self.documents.get(&uri.to_string()) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {:?}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Get definition location from parser
+        let def_location = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.goto_definition(&content, position.line, position.character)
+        };
+
+        match def_location {
+            Some(loc) => {
+                tracing::debug!("Definition found at {:?}", loc.selection_range);
+                Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri,
+                    range: loc.selection_range,
+                })))
+            }
+            None => {
+                tracing::debug!("No definition found");
                 Ok(None)
             }
         }

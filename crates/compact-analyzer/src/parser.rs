@@ -19,6 +19,15 @@ pub struct HoverInfo {
     /// The range of the hovered element.
     pub range: Option<Range>,
 }
+
+/// Definition location result.
+#[derive(Debug, Clone)]
+pub struct DefinitionLocation {
+    /// The range where the definition is located.
+    pub range: Range,
+    /// The range of just the symbol name (for selection).
+    pub selection_range: Range,
+}
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -576,6 +585,88 @@ impl ParserEngine {
 
         None
     }
+
+    /// Go to definition for the symbol at the given position.
+    ///
+    /// Returns the location of the definition if found.
+    pub fn goto_definition(&mut self, source: &str, line: u32, character: u32) -> Option<DefinitionLocation> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+
+        // Convert LSP position to tree-sitter point
+        let point = tree_sitter::Point {
+            row: line as usize,
+            column: character as usize,
+        };
+
+        // Find the node at this position
+        let node = root.descendant_for_point_range(point, point)?;
+
+        // Get the identifier text
+        let text = self.node_text(node, source_bytes);
+
+        // Skip if not an identifier or if it's a keyword/builtin
+        if node.kind() != "id" {
+            return None;
+        }
+
+        // Check if this is a keyword or builtin type (no definition to go to)
+        if self.keyword_docs(&text).is_some() || self.builtin_type_docs(&text).is_some() {
+            return None;
+        }
+
+        // Check if we're already on a definition
+        if let Some(parent) = node.parent() {
+            let parent_kind = parent.kind();
+            match parent_kind {
+                "cdefn" | "edecl" | "wdecl" => {
+                    if self.get_field_text(parent, "id", source_bytes).as_deref() == Some(&text) {
+                        // We're on the definition itself
+                        return Some(DefinitionLocation {
+                            range: self.node_range(parent),
+                            selection_range: self.node_range(node),
+                        });
+                    }
+                }
+                "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => {
+                    if self.get_field_text(parent, "name", source_bytes).as_deref() == Some(&text) {
+                        // We're on the definition itself
+                        return Some(DefinitionLocation {
+                            range: self.node_range(parent),
+                            selection_range: self.node_range(node),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Search for the definition
+        let def_node = self.find_definition_node(&text, root, source_bytes)?;
+
+        // Get the name node for selection range
+        let name_range = self.get_definition_name_range(def_node, source_bytes)
+            .unwrap_or_else(|| self.node_range(def_node));
+
+        Some(DefinitionLocation {
+            range: self.node_range(def_node),
+            selection_range: name_range,
+        })
+    }
+
+    /// Get the range of the name within a definition node.
+    fn get_definition_name_range(&self, node: Node, _source: &[u8]) -> Option<Range> {
+        let kind = node.kind();
+
+        let name_node = match kind {
+            "cdefn" | "edecl" | "wdecl" => node.child_by_field_name("id"),
+            "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => node.child_by_field_name("name"),
+            _ => None,
+        }?;
+
+        Some(self.node_range(name_node))
+    }
 }
 
 impl Default for ParserEngine {
@@ -662,5 +753,31 @@ circuit test(): Field {
         let info = info.unwrap();
         assert!(info.content.contains("add"));
         assert!(info.content.contains("Circuit function"));
+    }
+
+    #[test]
+    fn test_goto_definition_circuit() {
+        let mut parser = ParserEngine::new();
+        let source = r#"circuit helper(): Field { return 1; }
+circuit main(): Field { return helper(); }"#;
+        // Go to definition of "helper" in main (line 1, around column 32)
+        let loc = parser.goto_definition(source, 1, 32);
+        assert!(loc.is_some());
+        let loc = loc.unwrap();
+        // Should point to line 0 where helper is defined
+        assert_eq!(loc.selection_range.start.line, 0);
+    }
+
+    #[test]
+    fn test_goto_definition_struct() {
+        let mut parser = ParserEngine::new();
+        let source = r#"struct Point { x: Field; y: Field; }
+circuit make_point(): Point { return Point { x: 0, y: 0 }; }"#;
+        // Go to definition of "Point" in make_point return type (line 1, around column 22)
+        let loc = parser.goto_definition(source, 1, 22);
+        assert!(loc.is_some());
+        let loc = loc.unwrap();
+        // Should point to line 0 where Point is defined
+        assert_eq!(loc.selection_range.start.line, 0);
     }
 }

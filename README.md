@@ -15,13 +15,13 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 | Document Symbols | Outline view of circuits, structs, enums, modules, etc. |
 | Folding Ranges | Code folding for blocks, functions, control flow |
 | Hover | Documentation for keywords, types, and symbol signatures |
+| Go to Definition | Navigate to symbol definitions (same file) |
 
 ### Roadmap
 
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Semantic Tokens | Planned | Rich syntax highlighting via LSP |
-| Go to Definition | Planned | Navigate to symbol definitions |
 | Find References | Planned | Find all usages of a symbol |
 | Rename | Planned | Rename symbols across files |
 | Signature Help | Planned | Function parameter hints while typing |
