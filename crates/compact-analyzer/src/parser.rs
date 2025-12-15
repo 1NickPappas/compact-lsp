@@ -107,6 +107,44 @@ pub struct SyntaxError {
     pub range: Range,
 }
 
+/// A semantic token for syntax highlighting.
+#[derive(Debug, Clone)]
+pub struct SemanticToken {
+    /// The range of the token.
+    pub range: Range,
+    /// The type of the token.
+    pub token_type: SemanticTokenType,
+    /// Modifiers for the token.
+    pub modifiers: Vec<SemanticTokenModifier>,
+}
+
+/// Semantic token types for syntax highlighting.
+/// Order matters - these are indices into the LSP legend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum SemanticTokenType {
+    Function = 0,
+    Type = 1,
+    Struct = 2,
+    Enum = 3,
+    EnumMember = 4,
+    Parameter = 5,
+    Property = 6,
+    Variable = 7,
+    Namespace = 8,
+    TypeParameter = 9,
+}
+
+/// Semantic token modifiers for syntax highlighting.
+/// These are bit flags (1 << modifier_index).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum SemanticTokenModifier {
+    Declaration = 0,
+    Readonly = 1,
+    DefaultLibrary = 2,
+}
+
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -1244,6 +1282,209 @@ impl ParserEngine {
         }
     }
 
+    /// Get semantic tokens for syntax highlighting.
+    ///
+    /// Returns tokens for circuits, types, parameters, etc. with semantic meaning.
+    pub fn get_semantic_tokens(&mut self, source: &str) -> Vec<SemanticToken> {
+        let tree = match self.parse(source) {
+            Some(t) => t,
+            None => return vec![],
+        };
+
+        let mut tokens = Vec::new();
+        self.collect_semantic_tokens(tree.root_node(), source.as_bytes(), &mut tokens);
+
+        // Sort by position (line, then character) - required for LSP delta encoding
+        tokens.sort_by(|a, b| {
+            a.range
+                .start
+                .line
+                .cmp(&b.range.start.line)
+                .then(a.range.start.character.cmp(&b.range.start.character))
+        });
+
+        tokens
+    }
+
+    /// Recursively collect semantic tokens from the AST.
+    fn collect_semantic_tokens(
+        &self,
+        node: Node,
+        source: &[u8],
+        tokens: &mut Vec<SemanticToken>,
+    ) {
+        match node.kind() {
+            // Circuit/function definitions
+            "cdefn" | "edecl" | "wdecl" => {
+                // Get the function_name node which contains the actual name
+                if let Some(name_node) = node
+                    .children(&mut node.walk())
+                    .find(|n| n.kind() == "function_name")
+                {
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name_node),
+                        token_type: SemanticTokenType::Function,
+                        modifiers: vec![SemanticTokenModifier::Declaration],
+                    });
+                }
+            }
+
+            // Struct definitions
+            "struct" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: SemanticTokenType::Struct,
+                        modifiers: vec![SemanticTokenModifier::Declaration],
+                    });
+                }
+            }
+
+            // Enum definitions
+            "enumdef" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: SemanticTokenType::Enum,
+                        modifiers: vec![SemanticTokenModifier::Declaration],
+                    });
+                }
+                // Also collect enum variants
+                let mut cursor = node.walk();
+                let enum_name = node.child_by_field_name("name").map(|n| self.node_text(n, source));
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "id" {
+                        let text = self.node_text(child, source);
+                        // Skip the enum name itself
+                        if Some(&text) != enum_name.as_ref() {
+                            tokens.push(SemanticToken {
+                                range: self.node_range(child),
+                                token_type: SemanticTokenType::EnumMember,
+                                modifiers: vec![SemanticTokenModifier::Declaration],
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Parameters (parg for circuits)
+            // parg has: pattern (which contains id), type
+            "parg" => {
+                if let Some(pattern) = node.child_by_field_name("pattern") {
+                    // Pattern can be an id, tuple, or struct pattern
+                    // For simple identifiers, get the id field
+                    if let Some(id) = pattern.child_by_field_name("id") {
+                        tokens.push(SemanticToken {
+                            range: self.node_range(id),
+                            token_type: SemanticTokenType::Parameter,
+                            modifiers: vec![],
+                        });
+                    }
+                }
+            }
+
+            // Struct fields (arg within struct)
+            "arg" => {
+                // Check if parent is a struct
+                let is_struct_field = node.parent().map(|p| p.kind()) == Some("struct");
+                if let Some(name) = node.child_by_field_name("id") {
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: if is_struct_field {
+                            SemanticTokenType::Property
+                        } else {
+                            SemanticTokenType::Parameter
+                        },
+                        modifiers: vec![],
+                    });
+                }
+            }
+
+            // Type references (user-defined types like struct names)
+            "tref" => {
+                if let Some(name) = node.child_by_field_name("id") {
+                    let text = self.node_text(name, source);
+                    let modifiers = if is_builtin_type(&text) {
+                        vec![SemanticTokenModifier::DefaultLibrary]
+                    } else {
+                        vec![]
+                    };
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: SemanticTokenType::Type,
+                        modifiers,
+                    });
+                }
+            }
+
+            // Built-in types (these are literal string nodes in the grammar)
+            // In tree-sitter, these show up as anonymous nodes or as type children
+            "type" => {
+                // Check for built-in type keywords as direct children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    let kind = child.kind();
+                    if kind == "Boolean" || kind == "Field" {
+                        tokens.push(SemanticToken {
+                            range: self.node_range(child),
+                            token_type: SemanticTokenType::Type,
+                            modifiers: vec![SemanticTokenModifier::DefaultLibrary],
+                        });
+                    }
+                }
+            }
+
+            // Module definitions
+            "mdefn" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: SemanticTokenType::Namespace,
+                        modifiers: vec![SemanticTokenModifier::Declaration],
+                    });
+                }
+            }
+
+            // Ledger declarations
+            "ldecl" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: SemanticTokenType::Property,
+                        modifiers: vec![
+                            SemanticTokenModifier::Declaration,
+                            SemanticTokenModifier::Readonly,
+                        ],
+                    });
+                }
+            }
+
+            // Variable bindings (let/const)
+            "let_binding" | "const_binding" => {
+                if let Some(name) = node.child_by_field_name("id") {
+                    let modifiers = if node.kind() == "const_binding" {
+                        vec![SemanticTokenModifier::Declaration, SemanticTokenModifier::Readonly]
+                    } else {
+                        vec![SemanticTokenModifier::Declaration]
+                    };
+                    tokens.push(SemanticToken {
+                        range: self.node_range(name),
+                        token_type: SemanticTokenType::Variable,
+                        modifiers,
+                    });
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_semantic_tokens(child, source, tokens);
+        }
+    }
+
     /// Recursively collect import statements from the AST.
     fn collect_imports(&self, node: Node, source: &[u8], imports: &mut Vec<ImportInfo>) {
         if node.kind() == "idecl" {
@@ -1300,6 +1541,25 @@ impl ParserEngine {
             prefix,
         })
     }
+}
+
+/// Check if a type name is a Compact built-in type.
+fn is_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "Field"
+            | "Boolean"
+            | "Uint"
+            | "Bytes"
+            | "Vector"
+            | "Opaque"
+            | "Counter"
+            | "Void"
+            | "Map"
+            | "Set"
+            | "Cell"
+            | "Address"
+    )
 }
 
 impl Default for ParserEngine {
@@ -1621,5 +1881,113 @@ circuit broken3 {
             println!("  {}: {} at line {}", i + 1, err.message, err.range.start.line + 1);
         }
         assert!(errors.len() >= 2, "Should find multiple syntax errors, found {}", errors.len());
+    }
+
+    #[test]
+    fn test_semantic_tokens_basic() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+struct Point {
+    x: Field;
+    y: Field;
+}
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+
+        // Should find tokens for: circuit name, params, types, struct name, fields
+        assert!(!tokens.is_empty(), "Should find semantic tokens");
+
+        // Check for function token (circuit name)
+        let function_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Function)
+            .collect();
+        assert!(!function_tokens.is_empty(), "Should find function tokens");
+        assert!(
+            function_tokens.iter().any(|t| t.modifiers.contains(&SemanticTokenModifier::Declaration)),
+            "Function should have Declaration modifier"
+        );
+
+        // Check for type tokens (Field)
+        let type_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Type)
+            .collect();
+        assert!(!type_tokens.is_empty(), "Should find type tokens");
+        assert!(
+            type_tokens.iter().any(|t| t.modifiers.contains(&SemanticTokenModifier::DefaultLibrary)),
+            "Field type should have DefaultLibrary modifier"
+        );
+
+        // Check for parameter tokens
+        let param_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Parameter)
+            .collect();
+        assert!(!param_tokens.is_empty(), "Should find parameter tokens");
+
+        // Check for struct token
+        let struct_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Struct)
+            .collect();
+        assert!(!struct_tokens.is_empty(), "Should find struct tokens");
+
+        // Check for property tokens (struct fields)
+        let property_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Property)
+            .collect();
+        assert!(!property_tokens.is_empty(), "Should find property tokens for struct fields");
+    }
+
+    #[test]
+    fn test_semantic_tokens_enum() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+
+        // Check for enum token
+        let enum_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Enum)
+            .collect();
+        assert!(!enum_tokens.is_empty(), "Should find enum token");
+
+        // Check for enum member tokens
+        let member_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::EnumMember)
+            .collect();
+        assert_eq!(member_tokens.len(), 3, "Should find 3 enum member tokens");
+    }
+
+    #[test]
+    fn test_semantic_tokens_sorted() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit a(): Field { return 1; }
+circuit b(): Field { return 2; }
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+
+        // Verify tokens are sorted by position
+        for window in tokens.windows(2) {
+            let a = &window[0];
+            let b = &window[1];
+            let a_pos = (a.range.start.line, a.range.start.character);
+            let b_pos = (b.range.start.line, b.range.start.character);
+            assert!(a_pos <= b_pos, "Tokens should be sorted by position");
+        }
     }
 }

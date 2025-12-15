@@ -820,6 +820,37 @@ impl LanguageServer for CompactLanguageServer {
                     retrigger_characters: None,
                     work_done_progress_options: Default::default(),
                 }),
+                // Semantic tokens provider for rich syntax highlighting
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                // Token types - order must match SemanticTokenType enum in parser.rs
+                                token_types: vec![
+                                    SemanticTokenType::FUNCTION,      // 0
+                                    SemanticTokenType::TYPE,          // 1
+                                    SemanticTokenType::STRUCT,        // 2
+                                    SemanticTokenType::ENUM,          // 3
+                                    SemanticTokenType::ENUM_MEMBER,   // 4
+                                    SemanticTokenType::PARAMETER,     // 5
+                                    SemanticTokenType::PROPERTY,      // 6
+                                    SemanticTokenType::VARIABLE,      // 7
+                                    SemanticTokenType::NAMESPACE,     // 8
+                                    SemanticTokenType::TYPE_PARAMETER, // 9
+                                ],
+                                // Token modifiers - order must match SemanticTokenModifier enum
+                                token_modifiers: vec![
+                                    SemanticTokenModifier::DECLARATION,      // bit 0
+                                    SemanticTokenModifier::READONLY,         // bit 1
+                                    SemanticTokenModifier::DEFAULT_LIBRARY,  // bit 2
+                                ],
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: Some(false), // Not implementing range-based tokens yet
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             // Server identification
@@ -1678,5 +1709,76 @@ impl LanguageServer for CompactLanguageServer {
 
         tracing::debug!("No signature help at position");
         Ok(None)
+    }
+
+    /// Handle `textDocument/semanticTokens/full` request.
+    ///
+    /// Returns semantic tokens for the entire document.
+    /// These enable rich, semantic-aware syntax highlighting.
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri.to_string();
+        tracing::debug!("Semantic tokens requested for: {}", uri);
+
+        // Get the document content
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Get semantic tokens from parser
+        let tokens = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_semantic_tokens(&content)
+        };
+
+        tracing::debug!("Found {} semantic tokens", tokens.len());
+
+        // Encode tokens to LSP format (relative positioning)
+        // Each SemanticToken contains: delta_line, delta_start, length, token_type, token_modifiers_bitset
+        let mut data = Vec::new();
+        let mut prev_line = 0u32;
+        let mut prev_char = 0u32;
+
+        for token in tokens {
+            let line = token.range.start.line;
+            let char = token.range.start.character;
+            let length = token.range.end.character.saturating_sub(token.range.start.character);
+
+            // Calculate deltas (LSP uses relative positioning)
+            let delta_line = line - prev_line;
+            let delta_start = if delta_line == 0 {
+                char - prev_char
+            } else {
+                char // Reset to absolute on new line
+            };
+
+            // Encode modifiers as bitmask
+            let mut modifier_mask = 0u32;
+            for modifier in &token.modifiers {
+                modifier_mask |= 1 << (*modifier as u32);
+            }
+
+            data.push(lsp_types::SemanticToken {
+                delta_line,
+                delta_start,
+                length,
+                token_type: token.token_type as u32,
+                token_modifiers_bitset: modifier_mask,
+            });
+
+            prev_line = line;
+            prev_char = char;
+        }
+
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None, // No incremental updates yet
+            data,
+        })))
     }
 }
