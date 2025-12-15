@@ -15,7 +15,13 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+authors = ["1NickPappas"]
+description = "Language Server Protocol implementation for the Compact smart contract language"
 repository = "https://github.com/midnightntwrk/compact-lsp"
+homepage = "https://github.com/midnightntwrk/compact-lsp"
+keywords = ["lsp", "language-server", "compact", "smart-contracts", "midnight"]
+categories = ["development-tools", "text-editors"]
+rust-version = "1.70"
 
 # Shared dependencies - crates can use these with `.workspace = true`
 # This ensures all crates use the same versions, avoiding conflicts.

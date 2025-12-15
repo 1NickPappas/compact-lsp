@@ -1,5 +1,9 @@
 # compact-lsp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/midnightntwrk/compact-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/midnightntwrk/compact-lsp/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+
 Language Server Protocol implementation for the [Compact](https://docs.midnight.network/develop/reference/compact/lang-ref) smart contract language (Midnight network).
 
 ## Features
@@ -122,4 +126,4 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
 ## License
 
-Apache-2.0
+MIT
