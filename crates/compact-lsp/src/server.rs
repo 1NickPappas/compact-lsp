@@ -133,6 +133,41 @@ impl CompactLanguageServer {
             .await;
     }
 
+    /// Publish syntax diagnostics for a document (instant, on every keystroke).
+    ///
+    /// Uses tree-sitter to detect syntax errors immediately, without needing
+    /// to save the file or run the compiler.
+    async fn publish_syntax_diagnostics(&self, uri: Uri) {
+        let content = match self.documents.get(&uri.to_string()) {
+            Some(doc) => doc.content.to_string(),
+            None => return,
+        };
+
+        let syntax_errors = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_syntax_errors(&content)
+        };
+
+        let diagnostics: Vec<Diagnostic> = syntax_errors
+            .into_iter()
+            .map(|e| Diagnostic {
+                range: e.range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("compact-syntax".to_string()),
+                message: e.message,
+                ..Default::default()
+            })
+            .collect();
+
+        tracing::trace!(
+            "Publishing {} syntax diagnostics for {}",
+            diagnostics.len(),
+            uri.to_string()
+        );
+
+        self.client.publish_diagnostics(uri, diagnostics, None).await;
+    }
+
     /// Scan workspace for all .compact files and cache their symbols.
     ///
     /// This is called during initialization to populate the symbol cache
@@ -694,11 +729,12 @@ impl LanguageServer for CompactLanguageServer {
     /// - With INCREMENTAL sync: array of {range, text} changes
     /// - With FULL sync: single change with full document text
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
-        tracing::trace!("Document changed: {}", uri);
+        let uri = params.text_document.uri.clone();
+        let uri_string = uri.to_string();
+        tracing::trace!("Document changed: {}", uri_string);
 
         // Apply changes to our stored document
-        if let Some(mut doc) = self.documents.get_mut(&uri) {
+        if let Some(mut doc) = self.documents.get_mut(&uri_string) {
             for change in params.content_changes {
                 if let Some(range) = change.range {
                     // Incremental change: we have a range to replace
@@ -723,6 +759,9 @@ impl LanguageServer for CompactLanguageServer {
             }
             doc.version = params.text_document.version;
         }
+
+        // Publish syntax diagnostics immediately (live, on every keystroke)
+        self.publish_syntax_diagnostics(uri).await;
     }
 
     /// Handle `textDocument/didSave` notification.

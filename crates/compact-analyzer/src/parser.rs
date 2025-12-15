@@ -98,6 +98,15 @@ pub struct ImportInfo {
     pub prefix: Option<String>,
 }
 
+/// A syntax error detected by tree-sitter parsing.
+#[derive(Debug, Clone)]
+pub struct SyntaxError {
+    /// The error message.
+    pub message: String,
+    /// The range where the error occurred.
+    pub range: Range,
+}
+
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -1189,6 +1198,52 @@ impl ParserEngine {
         imports
     }
 
+    /// Get syntax errors from tree-sitter parsing.
+    ///
+    /// Returns immediate syntax errors detected by tree-sitter.
+    /// These are lightweight and fast - suitable for live diagnostics on every keystroke.
+    pub fn get_syntax_errors(&mut self, source: &str) -> Vec<SyntaxError> {
+        let tree = match self.parse(source) {
+            Some(t) => t,
+            None => return vec![],
+        };
+
+        let mut errors = Vec::new();
+        self.collect_syntax_errors(tree.root_node(), source.as_bytes(), &mut errors);
+        errors
+    }
+
+    /// Recursively collect syntax errors from the AST.
+    fn collect_syntax_errors(&self, node: Node, source: &[u8], errors: &mut Vec<SyntaxError>) {
+        if node.is_error() {
+            // ERROR node - unexpected token or invalid syntax
+            let text = self.node_text(node, source);
+            let message = if text.trim().is_empty() {
+                "Syntax error: unexpected token".to_string()
+            } else {
+                format!("Syntax error: unexpected '{}'", text.chars().take(30).collect::<String>())
+            };
+            errors.push(SyntaxError {
+                message,
+                range: self.node_range(node),
+            });
+        } else if node.is_missing() {
+            // MISSING node - expected token not found
+            let kind = node.kind();
+            let message = format!("Syntax error: missing {}", kind);
+            errors.push(SyntaxError {
+                message,
+                range: self.node_range(node),
+            });
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_syntax_errors(child, source, errors);
+        }
+    }
+
     /// Recursively collect import statements from the AST.
     fn collect_imports(&self, node: Node, source: &[u8], imports: &mut Vec<ImportInfo>) {
         if node.kind() == "idecl" {
@@ -1508,5 +1563,37 @@ module Utils {
 
         let add_symbol = add_symbol.unwrap();
         assert_eq!(add_symbol.kind, CompletionSymbolKind::Function, "Should be a Function");
+    }
+
+    #[test]
+    fn test_syntax_errors_valid_code() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+"#;
+        let errors = parser.get_syntax_errors(source);
+        assert!(errors.is_empty(), "Valid code should have no syntax errors");
+    }
+
+    #[test]
+    fn test_syntax_errors_missing_brace() {
+        let mut parser = ParserEngine::new();
+        // Missing closing brace
+        let source = r#"circuit broken(): Field {
+    return 1;
+"#;
+        let errors = parser.get_syntax_errors(source);
+        assert!(!errors.is_empty(), "Missing brace should produce syntax error");
+    }
+
+    #[test]
+    fn test_syntax_errors_unexpected_token() {
+        let mut parser = ParserEngine::new();
+        // Invalid syntax - unexpected token
+        let source = r#"circuit !!!invalid(): Field { return 1; }"#;
+        let errors = parser.get_syntax_errors(source);
+        assert!(!errors.is_empty(), "Invalid identifier should produce syntax error");
     }
 }
