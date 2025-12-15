@@ -1,0 +1,59 @@
+# Compact LSP - Language Server for the Compact smart contract language
+#
+# This is a Cargo workspace - it contains multiple crates (packages) that work together.
+# Workspaces let us share dependencies and compile everything together.
+
+[workspace]
+resolver = "2"  # Use the newer dependency resolver (recommended for Rust 2021+)
+members = [
+    "crates/compact-lsp",      # The main LSP binary
+    "crates/compact-analyzer", # Diagnostics engine (wraps compactc)
+]
+
+# Shared metadata for all crates in the workspace
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/midnightntwrk/compact-lsp"
+
+# Shared dependencies - crates can use these with `.workspace = true`
+# This ensures all crates use the same versions, avoiding conflicts.
+[workspace.dependencies]
+# LSP framework - handles JSON-RPC protocol, message parsing, etc.
+# Using the actively maintained community fork (Dec 2025)
+tower-lsp = { package = "tower-lsp-server", version = "0.23" }
+
+# LSP types (Diagnostic, Position, Range, etc.)
+# tower-lsp-server uses ls-types (fork of lsp-types)
+lsp-types = { package = "ls-types", version = "0.0.2" }
+
+# Async runtime - needed because LSP is inherently async (multiple requests in flight)
+# Using LTS version for stability (supported until Sep 2026)
+tokio = { version = "1.47", features = ["full", "process"] }
+
+# Serialization - LSP uses JSON for all messages
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Text data structure - efficiently handles incremental edits to large documents
+# Rope data structure: O(log N) for most operations, cheap clones
+ropey = "1.6"
+
+# Concurrent hashmap - stores open documents, accessed from multiple async tasks
+# Better than Arc<Mutex<HashMap>> - allows concurrent access to different keys
+dashmap = "6"
+
+# Logging - essential for debugging LSP (you can't use println! with stdio transport)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"      # For application errors (main binary)
+thiserror = "1"   # For library errors (compact-analyzer)
+
+# Parsing compiler output
+regex = "1"
+
+# Temp files for compiler invocation
+tempfile = "3"

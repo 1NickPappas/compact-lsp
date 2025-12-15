@@ -1,0 +1,33 @@
+[package]
+name = "compact-analyzer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# This is a library crate (not a binary)
+[lib]
+name = "compact_analyzer"
+path = "src/lib.rs"
+
+[dependencies]
+# LSP types (Diagnostic, Position, Range, etc.)
+lsp-types.workspace = true
+
+# We also need tower-lsp for some re-exports
+tower-lsp.workspace = true
+
+# Async - we spawn compactc as an async subprocess
+tokio.workspace = true
+
+# Error handling for library code
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Parse compiler error output
+regex.workspace = true
+
+# Create temp directories for compiler output
+tempfile.workspace = true
+
+# Logging
+tracing.workspace = true

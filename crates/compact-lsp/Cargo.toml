@@ -1,0 +1,38 @@
+[package]
+name = "compact-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# This tells Cargo to build a binary called "compact-lsp"
+[[bin]]
+name = "compact-lsp"
+path = "src/main.rs"
+
+[dependencies]
+# LSP framework - provides the LanguageServer trait we implement
+tower-lsp.workspace = true
+
+# LSP types (Position, Range, etc.)
+lsp-types.workspace = true
+
+# Async runtime - main() needs #[tokio::main] to run async code
+tokio.workspace = true
+
+# JSON serialization - for any custom LSP message handling
+serde.workspace = true
+serde_json.workspace = true
+
+# Document storage
+ropey.workspace = true      # Efficient text buffer for open documents
+dashmap.workspace = true    # Concurrent map: Uri -> Document
+
+# Logging - writes to stderr (not stdout, which is used for LSP)
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Error handling
+anyhow.workspace = true
+
+# Our diagnostic engine crate
+compact-analyzer = { path = "../compact-analyzer" }
