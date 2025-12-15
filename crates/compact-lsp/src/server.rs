@@ -75,6 +75,11 @@ pub struct CompactLanguageServer {
     /// Source cache for cross-file hover and definition.
     /// Maps file URI -> source content.
     source_cache: Arc<DashMap<String, String>>,
+
+    /// Pending semantic diagnostics tasks.
+    /// Maps file URI -> task handle for debounced compiler diagnostics.
+    /// When a new change comes in, we cancel the pending task and schedule a new one.
+    pending_diagnostics: Arc<DashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 impl CompactLanguageServer {
@@ -107,6 +112,7 @@ impl CompactLanguageServer {
             workspace_root: Arc::new(Mutex::new(None)),
             symbol_cache: Arc::new(DashMap::new()),
             source_cache: Arc::new(DashMap::new()),
+            pending_diagnostics: Arc::new(DashMap::new()),
         }
     }
 
@@ -166,6 +172,44 @@ impl CompactLanguageServer {
         );
 
         self.client.publish_diagnostics(uri, diagnostics, None).await;
+    }
+
+    /// Schedule semantic diagnostics with debounce.
+    ///
+    /// This schedules a compiler run after a 500ms delay. If another change
+    /// comes in before the delay expires, the pending task is cancelled and
+    /// a new one is scheduled. This prevents excessive compiler runs while typing.
+    async fn schedule_semantic_diagnostics(&self, uri: Uri, content: String) {
+        let uri_string = uri.to_string();
+
+        // Cancel any pending task for this file
+        if let Some((_, handle)) = self.pending_diagnostics.remove(&uri_string) {
+            handle.abort();
+            tracing::trace!("Cancelled pending diagnostics for {}", uri_string);
+        }
+
+        // Clone what we need for the spawned task
+        let client = self.client.clone();
+        let diagnostic_engine = self.diagnostic_engine.clone();
+        let pending = self.pending_diagnostics.clone();
+        let uri_clone = uri_string.clone();
+
+        // Schedule new task with 500ms delay
+        let handle = tokio::spawn(async move {
+            // Wait before running compiler
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            // Run compiler diagnostics
+            let diagnostics = diagnostic_engine.diagnose_content(&uri_clone, &content).await;
+
+            // Publish results
+            client.publish_diagnostics(uri, diagnostics, None).await;
+
+            // Remove ourselves from pending map
+            pending.remove(&uri_clone);
+        });
+
+        self.pending_diagnostics.insert(uri_string, handle);
     }
 
     /// Scan workspace for all .compact files and cache their symbols.
@@ -761,7 +805,14 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Publish syntax diagnostics immediately (live, on every keystroke)
-        self.publish_syntax_diagnostics(uri).await;
+        self.publish_syntax_diagnostics(uri.clone()).await;
+
+        // Schedule semantic diagnostics (debounced compiler run)
+        let content = match self.documents.get(&uri_string) {
+            Some(doc) => doc.content.to_string(),
+            None => return,
+        };
+        self.schedule_semantic_diagnostics(uri, content).await;
     }
 
     /// Handle `textDocument/didSave` notification.
@@ -788,10 +839,16 @@ impl LanguageServer for CompactLanguageServer {
     ///
     /// The editor closed the file. We should:
     /// - Remove it from our document store
+    /// - Cancel any pending diagnostics
     /// - Clear any diagnostics for this file
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         tracing::debug!("Document closed: {}", uri);
+
+        // Cancel any pending diagnostics for this file
+        if let Some((_, handle)) = self.pending_diagnostics.remove(&uri) {
+            handle.abort();
+        }
 
         // Remove from our store
         self.documents.remove(&uri);

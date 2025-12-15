@@ -175,6 +175,112 @@ impl DiagnosticEngine {
 
         diagnostics
     }
+
+    /// Run diagnostics on in-memory content (without requiring file save).
+    ///
+    /// This writes the content to a temporary file and runs the compiler on it.
+    /// Useful for live diagnostics while typing.
+    ///
+    /// # Arguments
+    ///
+    /// * `uri` - The original file URI (for logging and path resolution)
+    /// * `content` - The current in-memory content to diagnose
+    pub async fn diagnose_content(&self, uri: &str, content: &str) -> Vec<Diagnostic> {
+        // Check if compiler is available
+        let compiler_path = match &self.compiler_path {
+            Some(path) => path,
+            None => {
+                tracing::trace!("Compiler not available, skipping live diagnostics");
+                return Vec::new();
+            }
+        };
+
+        // Extract file path from URI to get the directory (for imports to resolve)
+        let original_path = match uri.strip_prefix("file://") {
+            Some(path) => path,
+            None => {
+                tracing::warn!("Invalid URI format: {}", uri);
+                return Vec::new();
+            }
+        };
+
+        // Get the directory of the original file for proper import resolution
+        let original_dir = match std::path::Path::new(original_path).parent() {
+            Some(dir) => dir,
+            None => {
+                tracing::warn!("Could not get parent directory: {}", original_path);
+                return Vec::new();
+            }
+        };
+
+        // Create temp file in the same directory as the original file
+        // This ensures imports resolve correctly
+        let temp_file_name = format!(".compact-lsp-temp-{}.compact", std::process::id());
+        let temp_file_path = original_dir.join(&temp_file_name);
+
+        // Write content to temp file
+        if let Err(e) = std::fs::write(&temp_file_path, content) {
+            tracing::error!("Failed to write temp file: {}", e);
+            return Vec::new();
+        }
+
+        // Create temp directory for compiler output
+        let temp_output_dir = match tempfile::tempdir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::error!("Failed to create temp directory: {}", e);
+                let _ = std::fs::remove_file(&temp_file_path);
+                return Vec::new();
+            }
+        };
+
+        tracing::trace!(
+            "Running live diagnostics: {} --vscode {} {}",
+            compiler_path,
+            temp_file_path.display(),
+            temp_output_dir.path().display()
+        );
+
+        // Run the compiler
+        let output = match tokio::process::Command::new(compiler_path)
+            .arg("--vscode")
+            .arg("--skip-zk")
+            .arg(&temp_file_path)
+            .arg(temp_output_dir.path())
+            .output()
+            .await
+        {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::error!("Failed to run compiler: {}", e);
+                let _ = std::fs::remove_file(&temp_file_path);
+                return Vec::new();
+            }
+        };
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&temp_file_path);
+
+        // Parse stderr and stdout for errors
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let mut diagnostics = Vec::new();
+
+        for line in stderr.lines().chain(stdout.lines()) {
+            if let Some(diag) = parse_error_line(line) {
+                diagnostics.push(diag);
+            }
+        }
+
+        tracing::trace!(
+            "Live diagnostics for {}: {} error(s)",
+            uri,
+            diagnostics.len()
+        );
+
+        diagnostics
+    }
 }
 
 impl Default for DiagnosticEngine {
