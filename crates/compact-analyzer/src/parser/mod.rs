@@ -1,159 +1,22 @@
-// This file is part of compact-lsp.
-// Copyright (C) 2025 Midnight Foundation
-// SPDX-License-Identifier: Apache-2.0
-
 //! Tree-sitter parser wrapper for Compact language.
 //!
 //! Provides parsing capabilities for:
 //! - Document symbols (outline view)
 //! - Folding ranges
 //! - Hover information
+//! - Go to definition
+//! - Signature help
+//! - Completion symbols
+//! - Imports extraction
+//! - Syntax errors
+//! - Semantic tokens
+//! - Find references
+
+mod types;
+
+pub use types::*;
 
 use lsp_types::{DocumentSymbol, FoldingRange, FoldingRangeKind, Position, Range, SymbolKind};
-
-/// Hover information result.
-#[derive(Debug, Clone)]
-pub struct HoverInfo {
-    /// The content to display (markdown).
-    pub content: String,
-    /// The range of the hovered element.
-    pub range: Option<Range>,
-}
-
-/// Definition location result.
-#[derive(Debug, Clone)]
-pub struct DefinitionLocation {
-    /// The range where the definition is located.
-    pub range: Range,
-    /// The range of just the symbol name (for selection).
-    pub selection_range: Range,
-}
-
-/// Parameter information for signature help.
-#[derive(Debug, Clone)]
-pub struct ParameterInfo {
-    /// Parameter label (e.g., "a: Field").
-    pub label: String,
-}
-
-/// Signature information result.
-#[derive(Debug, Clone)]
-pub struct SignatureInfo {
-    /// The full signature label (e.g., "circuit add(a: Field, b: Field): Field").
-    pub label: String,
-    /// Documentation for the signature.
-    pub documentation: Option<String>,
-    /// Parameters with their labels.
-    pub parameters: Vec<ParameterInfo>,
-    /// The index of the active parameter (0-based).
-    pub active_parameter: u32,
-}
-
-/// Symbol kind for completion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompletionSymbolKind {
-    Function,
-    Struct,
-    Enum,
-    Variable,
-    Module,
-}
-
-/// Location of a symbol in the source code.
-#[derive(Debug, Clone)]
-pub struct SymbolLocation {
-    /// Start line (0-based).
-    pub start_line: u32,
-    /// Start character (0-based).
-    pub start_char: u32,
-    /// End line (0-based).
-    pub end_line: u32,
-    /// End character (0-based).
-    pub end_char: u32,
-}
-
-/// A symbol for completion.
-#[derive(Debug, Clone)]
-pub struct CompletionSymbol {
-    /// The symbol name.
-    pub name: String,
-    /// The kind of symbol.
-    pub kind: CompletionSymbolKind,
-    /// Detail text (e.g., "(a: Field, b: Field): Field").
-    pub detail: Option<String>,
-    /// Location of the symbol definition.
-    pub location: Option<SymbolLocation>,
-    /// Documentation for the symbol.
-    pub documentation: Option<String>,
-}
-
-/// Information about an import statement.
-#[derive(Debug, Clone)]
-pub struct ImportInfo {
-    /// The import path (e.g., "../utils/Utils" or "CompactStandardLibrary").
-    pub path: String,
-    /// True if this is a file import (quoted path), false if it's an identifier import.
-    pub is_file: bool,
-    /// The prefix for imported symbols (e.g., "Utils_").
-    pub prefix: Option<String>,
-}
-
-/// A syntax error detected by tree-sitter parsing.
-#[derive(Debug, Clone)]
-pub struct SyntaxError {
-    /// The error message.
-    pub message: String,
-    /// The range where the error occurred.
-    pub range: Range,
-}
-
-/// A semantic token for syntax highlighting.
-#[derive(Debug, Clone)]
-pub struct SemanticToken {
-    /// The range of the token.
-    pub range: Range,
-    /// The type of the token.
-    pub token_type: SemanticTokenType,
-    /// Modifiers for the token.
-    pub modifiers: Vec<SemanticTokenModifier>,
-}
-
-/// Semantic token types for syntax highlighting.
-/// Order matters - these are indices into the LSP legend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum SemanticTokenType {
-    Function = 0,
-    Type = 1,
-    Struct = 2,
-    Enum = 3,
-    EnumMember = 4,
-    Parameter = 5,
-    Property = 6,
-    Variable = 7,
-    Namespace = 8,
-    TypeParameter = 9,
-}
-
-/// Semantic token modifiers for syntax highlighting.
-/// These are bit flags (1 << modifier_index).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum SemanticTokenModifier {
-    Declaration = 0,
-    Readonly = 1,
-    DefaultLibrary = 2,
-}
-
-/// A reference location for Find References.
-#[derive(Debug, Clone)]
-pub struct ReferenceLocation {
-    /// The range of the reference.
-    pub range: Range,
-    /// True if this is the definition site, false if it's a usage.
-    pub is_definition: bool,
-}
-
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -2182,5 +2045,288 @@ circuit foo(): Field {
 
         // Should find nothing
         assert!(refs.is_empty(), "Should find no references to 'bar'");
+    }
+
+    // ========== New edge case tests ==========
+
+    #[test]
+    fn test_find_references_ledger() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+ledger balance: Map<Address, Uint<64>>;
+
+circuit deposit(amount: Uint<64>): Void {
+    balance.insert(sender(), amount);
+}
+
+circuit withdraw(amount: Uint<64>): Uint<64> {
+    return balance.lookup(sender());
+}
+"#;
+        let refs = parser.find_references(source, "balance");
+
+        // Should find at least the definition
+        assert!(!refs.is_empty(), "Should find references to 'balance'");
+
+        // Check that exactly one is a definition
+        let definitions: Vec<_> = refs.iter().filter(|r| r.is_definition).collect();
+        assert_eq!(definitions.len(), 1, "Should find exactly 1 definition of 'balance'");
+    }
+
+    #[test]
+    fn test_goto_definition_ledger() {
+        let mut parser = ParserEngine::new();
+        let source = r#"ledger counter: Counter;
+
+circuit increment(): Void {
+    counter.increment(1);
+}"#;
+        // Go to definition of "counter" on line 0 (the ledger declaration itself)
+        let loc = parser.goto_definition(source, 0, 7);
+        assert!(loc.is_some(), "Should find ledger definition");
+        let loc = loc.unwrap();
+        // Should point to line 0 where counter is defined
+        assert_eq!(loc.selection_range.start.line, 0);
+    }
+
+    #[test]
+    fn test_semantic_tokens_ledger() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+ledger balance: Map<Address, Uint<64>>;
+ledger counter: Counter;
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+
+        // Check for property tokens (ledger names)
+        let property_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Property)
+            .collect();
+        assert!(property_tokens.len() >= 2, "Should find at least 2 property tokens for ledgers");
+
+        // Check that ledger tokens have readonly modifier
+        assert!(
+            property_tokens.iter().any(|t| t.modifiers.contains(&SemanticTokenModifier::Readonly)),
+            "Ledger should have Readonly modifier"
+        );
+    }
+
+    #[test]
+    fn test_semantic_tokens_witness() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+witness get_secret(): Field;
+witness get_private_key(id: Uint<32>): Bytes<32>;
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+
+        // Check for function tokens (witness names)
+        let function_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Function)
+            .collect();
+        assert!(function_tokens.len() >= 2, "Should find at least 2 function tokens for witnesses");
+
+        // Check that witness tokens have declaration modifier
+        assert!(
+            function_tokens.iter().all(|t| t.modifiers.contains(&SemanticTokenModifier::Declaration)),
+            "Witness functions should have Declaration modifier"
+        );
+    }
+
+    #[test]
+    fn test_folding_ranges_nested() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit test(x: Field): Field {
+    if (x > 0) {
+        const a = 1;
+        if (x > 10) {
+            const b = 2;
+            return b;
+        }
+        return a;
+    }
+    return 0;
+}
+"#;
+        let ranges = parser.folding_ranges(source);
+
+        // Should find at least 3 folding ranges: circuit body + 2 if statements
+        assert!(ranges.len() >= 3, "Should find at least 3 folding ranges for nested blocks, found {}", ranges.len());
+
+        // Check that we have different starting lines for nested structures
+        let start_lines: Vec<_> = ranges.iter().map(|r| r.start_line).collect();
+        let unique_lines: std::collections::HashSet<_> = start_lines.iter().collect();
+        assert!(unique_lines.len() >= 2, "Should have folding ranges on different lines");
+    }
+
+    #[test]
+    fn test_document_symbols_enum_variants() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+enum Status {
+    Pending,
+    Active,
+    Completed,
+}
+"#;
+        let symbols = parser.document_symbols(source);
+
+        assert_eq!(symbols.len(), 1, "Should find 1 enum");
+        assert_eq!(symbols[0].name, "Status");
+        assert_eq!(symbols[0].kind, SymbolKind::ENUM);
+
+        // Check that enum has variant children
+        let children = symbols[0].children.as_ref();
+        assert!(children.is_some(), "Enum should have children");
+        let children = children.unwrap();
+        assert_eq!(children.len(), 3, "Should find 3 enum variants");
+
+        // Verify variant names
+        let variant_names: Vec<_> = children.iter().map(|c| c.name.as_str()).collect();
+        assert!(variant_names.contains(&"Pending"), "Should have Pending variant");
+        assert!(variant_names.contains(&"Active"), "Should have Active variant");
+        assert!(variant_names.contains(&"Completed"), "Should have Completed variant");
+    }
+
+    #[test]
+    fn test_document_symbols_struct_fields() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+struct Transaction {
+    sender: Address;
+    recipient: Address;
+    amount: Uint<64>;
+    nonce: Field;
+}
+"#;
+        let symbols = parser.document_symbols(source);
+
+        assert_eq!(symbols.len(), 1, "Should find 1 struct");
+        assert_eq!(symbols[0].name, "Transaction");
+        assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
+
+        // Check that struct has field children
+        let children = symbols[0].children.as_ref();
+        assert!(children.is_some(), "Struct should have children");
+        let children = children.unwrap();
+        assert_eq!(children.len(), 4, "Should find 4 struct fields");
+
+        // All children should be fields
+        assert!(
+            children.iter().all(|c| c.kind == SymbolKind::FIELD),
+            "All struct children should be fields"
+        );
+    }
+
+    #[test]
+    fn test_document_symbols_module() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+module Math {
+    export circuit add(a: Field, b: Field): Field {
+        return a + b;
+    }
+
+    export circuit multiply(a: Field, b: Field): Field {
+        return a * b;
+    }
+}
+"#;
+        let symbols = parser.document_symbols(source);
+
+        assert_eq!(symbols.len(), 1, "Should find 1 module");
+        assert_eq!(symbols[0].name, "Math");
+        assert_eq!(symbols[0].kind, SymbolKind::MODULE);
+
+        // Check that module has circuit children
+        let children = symbols[0].children.as_ref();
+        assert!(children.is_some(), "Module should have children");
+        let children = children.unwrap();
+        assert!(children.len() >= 2, "Should find at least 2 circuits in module");
+    }
+
+    #[test]
+    fn test_hover_ledger_declaration() {
+        let mut parser = ParserEngine::new();
+        let source = r#"ledger balance: Map<Address, Uint<64>>;"#;
+        // Hover on "balance" at position (0, 7)
+        let info = parser.hover_info(source, 0, 7);
+        assert!(info.is_some(), "Should find hover info for ledger");
+        let info = info.unwrap();
+        assert!(info.content.contains("ledger"), "Hover should mention 'ledger'");
+        assert!(info.content.contains("balance"), "Hover should contain name 'balance'");
+    }
+
+    #[test]
+    fn test_hover_witness_declaration() {
+        let mut parser = ParserEngine::new();
+        let source = r#"witness get_secret(): Field;"#;
+        // Hover on "get_secret" at position (0, 8)
+        let info = parser.hover_info(source, 0, 8);
+        assert!(info.is_some(), "Should find hover info for witness");
+        let info = info.unwrap();
+        assert!(info.content.contains("witness") || info.content.contains("Witness"),
+                "Hover should mention 'witness'");
+    }
+
+    #[test]
+    fn test_completion_symbols_with_documentation() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit calculate(x: Field, y: Field): Field {
+    return x * y + 1;
+}
+
+struct Config {
+    threshold: Uint<64>;
+    enabled: Boolean;
+}
+"#;
+        let symbols = parser.get_completion_symbols(source);
+
+        // Check circuit has documentation
+        let circuit_sym = symbols.iter().find(|s| s.name == "calculate");
+        assert!(circuit_sym.is_some(), "Should find calculate circuit");
+        let circuit_sym = circuit_sym.unwrap();
+        assert!(circuit_sym.documentation.is_some(), "Circuit should have documentation");
+        assert!(circuit_sym.documentation.as_ref().unwrap().contains("Circuit function"),
+                "Documentation should mention Circuit function");
+
+        // Check struct has documentation
+        let struct_sym = symbols.iter().find(|s| s.name == "Config");
+        assert!(struct_sym.is_some(), "Should find Config struct");
+        let struct_sym = struct_sym.unwrap();
+        assert!(struct_sym.documentation.is_some(), "Struct should have documentation");
+        assert!(struct_sym.documentation.as_ref().unwrap().contains("Struct type"),
+                "Documentation should mention Struct type");
+    }
+
+    #[test]
+    fn test_import_with_complex_path() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+import "../../contracts/token/ERC20" prefix Token_;
+import "../../../shared/utils/Helpers" prefix Help_;
+import CompactStandardLibrary;
+
+circuit main(): Field {
+    return 1;
+}
+"#;
+        let imports = parser.get_imports(source);
+
+        assert_eq!(imports.len(), 3, "Should find 3 imports");
+
+        // Check complex relative paths are handled
+        let token_import = imports.iter().find(|i| i.path.contains("ERC20"));
+        assert!(token_import.is_some(), "Should find ERC20 import");
+        assert!(token_import.unwrap().is_file, "Should be a file import");
+
+        let helpers_import = imports.iter().find(|i| i.path.contains("Helpers"));
+        assert!(helpers_import.is_some(), "Should find Helpers import");
+        assert_eq!(helpers_import.unwrap().prefix.as_deref(), Some("Help_"), "Should have Help_ prefix");
     }
 }

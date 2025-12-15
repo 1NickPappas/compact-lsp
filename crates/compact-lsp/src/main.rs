@@ -1,7 +1,3 @@
-// This file is part of compact-lsp.
-// Copyright (C) 2025 Midnight Foundation
-// SPDX-License-Identifier: Apache-2.0
-
 //! Compact LSP - Language Server for the Compact smart contract language
 //!
 //! # How this works
