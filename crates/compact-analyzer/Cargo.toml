@@ -31,3 +31,7 @@ tempfile.workspace = true
 
 # Logging
 tracing.workspace = true
+
+# Tree-sitter for parsing
+tree-sitter.workspace = true
+tree-sitter-compact.workspace = true

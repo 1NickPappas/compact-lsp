@@ -57,3 +57,7 @@ regex = "1"
 
 # Temp files for compiler invocation
 tempfile = "3"
+
+# Tree-sitter for parsing
+tree-sitter = "0.25"
+tree-sitter-compact = { path = "../compact-tree-sitter" }

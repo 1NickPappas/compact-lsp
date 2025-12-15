@@ -7,9 +7,12 @@
 //! This crate provides:
 //! - Diagnostics engine: wraps `compactc` compiler for error reporting
 //! - Formatter engine: wraps `format-compact` for code formatting
+//! - Parser engine: wraps tree-sitter for AST-based features
 
 pub mod diagnostics;
 pub mod formatter;
+pub mod parser;
 
 pub use diagnostics::DiagnosticEngine;
 pub use formatter::FormatterEngine;
+pub use parser::ParserEngine;

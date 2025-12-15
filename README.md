@@ -12,12 +12,13 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 | Document Sync | Tracks file changes with incremental updates |
 | Completion | Keywords, built-in types, and snippet templates |
 | Formatting | Format document using `format-compact` |
+| Document Symbols | Outline view of circuits, structs, enums, modules, etc. |
+| Folding Ranges | Code folding for blocks, functions, control flow |
 
 ### Roadmap
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Document Symbols | Planned | Outline view of functions, types, etc. |
 | Semantic Tokens | Planned | Rich syntax highlighting via LSP |
 | Hover | Planned | Type info and documentation on hover |
 | Go to Definition | Planned | Navigate to symbol definitions |

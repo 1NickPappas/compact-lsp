@@ -20,7 +20,8 @@ use lsp_types::*;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::{Client, LanguageServer};
 
-use compact_analyzer::{DiagnosticEngine, FormatterEngine};
+use compact_analyzer::{DiagnosticEngine, FormatterEngine, ParserEngine};
+use std::sync::Mutex;
 
 /// A document we're tracking (an open file in the editor).
 #[derive(Debug, Clone)]
@@ -58,6 +59,10 @@ pub struct CompactLanguageServer {
 
     /// The formatter engine that wraps format-compact.
     formatter_engine: Arc<FormatterEngine>,
+
+    /// The parser engine for tree-sitter based features.
+    /// Wrapped in Mutex because tree-sitter Parser is not Send.
+    parser_engine: Arc<Mutex<ParserEngine>>,
 }
 
 impl CompactLanguageServer {
@@ -78,11 +83,15 @@ impl CompactLanguageServer {
             tracing::warn!("Compact formatter not found - formatting will be unavailable");
         }
 
+        let parser_engine = ParserEngine::new();
+        tracing::info!("Tree-sitter parser initialized");
+
         Self {
             client,
             documents: Arc::new(DashMap::new()),
             diagnostic_engine: Arc::new(diagnostic_engine),
             formatter_engine: Arc::new(formatter_engine),
+            parser_engine: Arc::new(Mutex::new(parser_engine)),
         }
     }
 
@@ -159,6 +168,10 @@ impl LanguageServer for CompactLanguageServer {
                 }),
                 // Document formatting provider
                 document_formatting_provider: Some(OneOf::Left(true)),
+                // Document symbols provider (outline view)
+                document_symbol_provider: Some(OneOf::Left(true)),
+                // Folding ranges provider
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 // We'll add more capabilities as we implement features:
                 // - hover_provider: for hover information
                 // - definition_provider: for go-to-definition
@@ -564,5 +577,63 @@ impl LanguageServer for CompactLanguageServer {
 
         tracing::debug!("Formatting complete");
         Ok(Some(vec![edit]))
+    }
+
+    /// Handle `textDocument/documentSymbol` request.
+    ///
+    /// Returns a hierarchical list of symbols (functions, types, etc.) in the document.
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri.to_string();
+        tracing::debug!("Document symbols requested for: {}", uri);
+
+        // Get the document content
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Parse and extract symbols
+        let symbols = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.document_symbols(&content)
+        };
+
+        tracing::debug!("Found {} symbols", symbols.len());
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+    }
+
+    /// Handle `textDocument/foldingRange` request.
+    ///
+    /// Returns a list of folding ranges in the document.
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> Result<Option<Vec<FoldingRange>>> {
+        let uri = params.text_document.uri.to_string();
+        tracing::debug!("Folding ranges requested for: {}", uri);
+
+        // Get the document content
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Parse and extract folding ranges
+        let ranges = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.folding_ranges(&content)
+        };
+
+        tracing::debug!("Found {} folding ranges", ranges.len());
+        Ok(Some(ranges))
     }
 }
