@@ -145,6 +145,15 @@ pub enum SemanticTokenModifier {
     DefaultLibrary = 2,
 }
 
+/// A reference location for Find References.
+#[derive(Debug, Clone)]
+pub struct ReferenceLocation {
+    /// The range of the reference.
+    pub range: Range,
+    /// True if this is the definition site, false if it's a usage.
+    pub is_definition: bool,
+}
+
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -1485,6 +1494,121 @@ impl ParserEngine {
         }
     }
 
+    /// Find all references to a symbol in source code.
+    ///
+    /// Returns both definition sites and usage sites.
+    pub fn find_references(&mut self, source: &str, symbol_name: &str) -> Vec<ReferenceLocation> {
+        let tree = match self.parse(source) {
+            Some(t) => t,
+            None => return vec![],
+        };
+
+        let mut refs = Vec::new();
+        self.collect_references(tree.root_node(), source.as_bytes(), symbol_name, &mut refs);
+        refs
+    }
+
+    /// Recursively collect references to a symbol from the AST.
+    fn collect_references(
+        &self,
+        node: Node,
+        source: &[u8],
+        symbol_name: &str,
+        refs: &mut Vec<ReferenceLocation>,
+    ) {
+        let kind = node.kind();
+
+        // Check for definition sites
+        match kind {
+            "cdefn" | "edecl" | "wdecl" => {
+                // Check function_name child for circuit/witness definitions
+                if let Some(name_node) = node
+                    .children(&mut node.walk())
+                    .find(|n| n.kind() == "function_name")
+                {
+                    if self.node_text(name_node, source) == symbol_name {
+                        refs.push(ReferenceLocation {
+                            range: self.node_range(name_node),
+                            is_definition: true,
+                        });
+                    }
+                }
+            }
+            "struct" | "enumdef" | "mdefn" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    if self.node_text(name, source) == symbol_name {
+                        refs.push(ReferenceLocation {
+                            range: self.node_range(name),
+                            is_definition: true,
+                        });
+                    }
+                }
+            }
+            "ldecl" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    if self.node_text(name, source) == symbol_name {
+                        refs.push(ReferenceLocation {
+                            range: self.node_range(name),
+                            is_definition: true,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Check for usage sites
+        match kind {
+            // Function calls - look for the function name being called
+            "function_call_term" => {
+                if let Some(fun) = node.child_by_field_name("fun") {
+                    // The fun field contains the function being called
+                    // It could be an id directly or a more complex expression
+                    self.check_function_call_name(fun, source, symbol_name, refs);
+                }
+            }
+            // Type references (struct/enum usage in type positions)
+            "tref" => {
+                if let Some(id) = node.child_by_field_name("id") {
+                    if self.node_text(id, source) == symbol_name {
+                        refs.push(ReferenceLocation {
+                            range: self.node_range(id),
+                            is_definition: false,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_references(child, source, symbol_name, refs);
+        }
+    }
+
+    /// Check if a function call's target matches the symbol name.
+    fn check_function_call_name(
+        &self,
+        fun_node: Node,
+        source: &[u8],
+        symbol_name: &str,
+        refs: &mut Vec<ReferenceLocation>,
+    ) {
+        // The function being called could be:
+        // 1. A simple identifier: add(...)
+        // 2. A qualified name: Module.add(...) (though Compact uses prefix style)
+        // For now, check if the entire text matches or if it's a simple id
+        let text = self.node_text(fun_node, source);
+        if text == symbol_name {
+            refs.push(ReferenceLocation {
+                range: self.node_range(fun_node),
+                is_definition: false,
+            });
+        }
+    }
+
     /// Recursively collect import statements from the AST.
     fn collect_imports(&self, node: Node, source: &[u8], imports: &mut Vec<ImportInfo>) {
         if node.kind() == "idecl" {
@@ -1989,5 +2113,74 @@ circuit b(): Field { return 2; }
             let b_pos = (b.range.start.line, b.range.start.character);
             assert!(a_pos <= b_pos, "Tokens should be sorted by position");
         }
+    }
+
+    #[test]
+    fn test_find_references_circuit() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+circuit main(): Field {
+    let x = add(1, 2);
+    let y = add(3, 4);
+    return add(x, y);
+}
+"#;
+        let refs = parser.find_references(source, "add");
+
+        // Should find: 1 definition + 3 calls = 4 references
+        assert_eq!(refs.len(), 4, "Should find 4 references to 'add'");
+
+        // Check that exactly one is a definition
+        let definitions: Vec<_> = refs.iter().filter(|r| r.is_definition).collect();
+        assert_eq!(definitions.len(), 1, "Should find exactly 1 definition");
+
+        // Check that three are usages
+        let usages: Vec<_> = refs.iter().filter(|r| !r.is_definition).collect();
+        assert_eq!(usages.len(), 3, "Should find 3 usages");
+    }
+
+    #[test]
+    fn test_find_references_struct() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+struct Point {
+    x: Field;
+    y: Field;
+}
+
+circuit make_point(): Point {
+    return Point { x: 0, y: 0 };
+}
+
+circuit use_point(p: Point): Field {
+    return p.x;
+}
+"#;
+        let refs = parser.find_references(source, "Point");
+
+        // Should find: 1 definition + usages in return type, function param type
+        assert!(refs.len() >= 3, "Should find at least 3 references to 'Point'");
+
+        // Check that exactly one is a definition
+        let definitions: Vec<_> = refs.iter().filter(|r| r.is_definition).collect();
+        assert_eq!(definitions.len(), 1, "Should find exactly 1 definition");
+    }
+
+    #[test]
+    fn test_find_references_no_match() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit foo(): Field {
+    return 1;
+}
+"#;
+        let refs = parser.find_references(source, "bar");
+
+        // Should find nothing
+        assert!(refs.is_empty(), "Should find no references to 'bar'");
     }
 }

@@ -735,6 +735,55 @@ impl CompactLanguageServer {
             .filter(|s| !s.is_empty())
             .collect()
     }
+
+    /// Get the symbol names to search for in a given file.
+    ///
+    /// Handles import prefixes - e.g., if defining_file exports "add" and
+    /// searching_file imports it with prefix "Utils_", we need to search for "Utils_add".
+    fn get_search_names_for_file(
+        &self,
+        searching_file: &str,
+        defining_file: &str,
+        symbol_name: &str,
+    ) -> Vec<String> {
+        let mut names = Vec::new();
+
+        // Get imports from the searching file
+        let content = match self.source_cache.get(searching_file) {
+            Some(c) => c.clone(),
+            None => return names,
+        };
+
+        let imports = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_imports(&content)
+        };
+
+        // Check if any import points to the defining file
+        for import in imports {
+            if !import.is_file {
+                continue;
+            }
+            if let Some(resolved) = self.resolve_import_path(searching_file, &import.path) {
+                if resolved == defining_file {
+                    // Found the import - apply prefix if any
+                    let prefixed_name = match &import.prefix {
+                        Some(prefix) => format!("{}{}", prefix, symbol_name),
+                        None => symbol_name.to_string(),
+                    };
+                    names.push(prefixed_name);
+                }
+            }
+        }
+
+        // Also search for the unprefixed name (in case the symbol is used locally
+        // or imported without prefix)
+        if !names.contains(&symbol_name.to_string()) {
+            names.push(symbol_name.to_string());
+        }
+
+        names
+    }
 }
 
 /// Implementation of the Language Server Protocol.
@@ -814,6 +863,8 @@ impl LanguageServer for CompactLanguageServer {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 // Go to definition provider
                 definition_provider: Some(OneOf::Left(true)),
+                // Find references provider
+                references_provider: Some(OneOf::Left(true)),
                 // Signature help provider
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
@@ -1780,5 +1831,110 @@ impl LanguageServer for CompactLanguageServer {
             result_id: None, // No incremental updates yet
             data,
         })))
+    }
+
+    /// Handle `textDocument/references` request.
+    ///
+    /// Find all references to the symbol at the given position.
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri.clone();
+        let uri_string = uri.to_string();
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        tracing::debug!(
+            "Find references at {}:{}:{}",
+            uri_string,
+            position.line,
+            position.character
+        );
+
+        // Get document content
+        let content = match self.documents.get(&uri_string) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri_string);
+                return Ok(None);
+            }
+        };
+
+        // Find what symbol is at cursor
+        let symbol_name = match self.get_word_at_position(&content, position.line, position.character) {
+            Some(name) => name,
+            None => {
+                tracing::debug!("No symbol at cursor position");
+                return Ok(None);
+            }
+        };
+
+        tracing::debug!("Finding references for symbol: {}", symbol_name);
+
+        let mut all_locations = Vec::new();
+
+        // 1. Find references in current file
+        let local_refs = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.find_references(&content, &symbol_name)
+        };
+
+        for r in local_refs {
+            if r.is_definition && !include_declaration {
+                continue;
+            }
+            all_locations.push(Location {
+                uri: uri.clone(),
+                range: r.range,
+            });
+        }
+
+        // 2. Find references in all other workspace files
+        for entry in self.source_cache.iter() {
+            let file_uri = entry.key();
+            if file_uri == &uri_string {
+                continue; // Skip current file (already processed)
+            }
+
+            let file_content = entry.value();
+
+            // Determine what name to search for in this file
+            // (handles import prefixes)
+            let search_names = self.get_search_names_for_file(file_uri, &uri_string, &symbol_name);
+
+            for search_name in search_names {
+                let refs = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.find_references(file_content, &search_name)
+                };
+
+                for r in refs {
+                    // In other files, we only find usages, not definitions
+                    // (the definition is in the current file)
+                    if r.is_definition {
+                        continue;
+                    }
+                    if let Ok(loc_uri) = file_uri.parse::<lsp_types::Uri>() {
+                        all_locations.push(Location {
+                            uri: loc_uri,
+                            range: r.range,
+                        });
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "Found {} references for '{}'",
+            all_locations.len(),
+            symbol_name
+        );
+
+        if all_locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(all_locations))
+        }
     }
 }
