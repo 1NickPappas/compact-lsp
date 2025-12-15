@@ -48,6 +48,27 @@ pub struct SignatureInfo {
     /// The index of the active parameter (0-based).
     pub active_parameter: u32,
 }
+
+/// Symbol kind for completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionSymbolKind {
+    Function,
+    Struct,
+    Enum,
+    Variable,
+    Module,
+}
+
+/// A symbol for completion.
+#[derive(Debug, Clone)]
+pub struct CompletionSymbol {
+    /// The symbol name.
+    pub name: String,
+    /// The kind of symbol.
+    pub kind: CompletionSymbolKind,
+    /// Detail text (e.g., "(a: Field, b: Field): Field").
+    pub detail: Option<String>,
+}
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -954,6 +975,119 @@ impl ParserEngine {
 
         params
     }
+
+    /// Get all symbols in the source for completion.
+    ///
+    /// Returns symbols defined in the file (circuits, structs, enums, etc.)
+    pub fn get_completion_symbols(&mut self, source: &str) -> Vec<CompletionSymbol> {
+        let tree = match self.parse(source) {
+            Some(tree) => tree,
+            None => return vec![],
+        };
+
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+        let mut symbols = Vec::new();
+
+        self.collect_completion_symbols(root, source_bytes, &mut symbols);
+
+        symbols
+    }
+
+    /// Recursively collect completion symbols from the AST.
+    fn collect_completion_symbols(&self, node: Node, source: &[u8], symbols: &mut Vec<CompletionSymbol>) {
+        let kind = node.kind();
+
+        match kind {
+            // Circuit definitions
+            "cdefn" => {
+                if let Some(name) = self.get_function_name(node, source) {
+                    let params = self.extract_params(node, source);
+                    let return_type = self.get_type_text(node, source).unwrap_or_default();
+                    let detail = format!("({}): {}", params, return_type);
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Function,
+                        detail: Some(detail),
+                    });
+                }
+            }
+            // External circuit declarations
+            "edecl" => {
+                if let Some(name) = self.get_function_name(node, source) {
+                    let params = self.extract_params(node, source);
+                    let return_type = self.get_type_text(node, source).unwrap_or_default();
+                    let detail = format!("({}): {}", params, return_type);
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Function,
+                        detail: Some(detail),
+                    });
+                }
+            }
+            // Witness declarations
+            "wdecl" => {
+                if let Some(name) = self.get_function_name(node, source) {
+                    let params = self.extract_params(node, source);
+                    let return_type = self.get_type_text(node, source).unwrap_or_default();
+                    let detail = format!("({}): {}", params, return_type);
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Function,
+                        detail: Some(detail),
+                    });
+                }
+            }
+            // Struct definitions
+            "struct" => {
+                if let Some(name) = self.get_field_text(node, "name", source) {
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Struct,
+                        detail: Some("struct".to_string()),
+                    });
+                }
+            }
+            // Enum definitions
+            "enumdef" => {
+                if let Some(name) = self.get_field_text(node, "name", source) {
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Enum,
+                        detail: Some("enum".to_string()),
+                    });
+                }
+            }
+            // Ledger declarations
+            "ldecl" => {
+                if let Some(name) = self.get_field_text(node, "name", source) {
+                    let type_text = self.get_field_text(node, "type", source);
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Variable,
+                        detail: type_text.map(|t| format!("ledger: {}", t)),
+                    });
+                }
+            }
+            // Module definitions
+            "mdefn" => {
+                if let Some(name) = self.get_field_text(node, "name", source) {
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Module,
+                        detail: Some("module".to_string()),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_completion_symbols(child, source, symbols);
+        }
+    }
 }
 
 impl Default for ParserEngine {
@@ -1120,5 +1254,32 @@ circuit main(): Field {
         assert!(info.is_some(), "Should find signature help for incomplete call");
         let info = info.unwrap();
         assert!(info.label.contains("add"), "Label should contain function name");
+    }
+
+    #[test]
+    fn test_completion_symbols() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+struct Point {
+    x: Field;
+    y: Field;
+}
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+"#;
+        let symbols = parser.get_completion_symbols(source);
+
+        // Should find circuit, struct, and enum
+        assert!(symbols.iter().any(|s| s.name == "add" && s.kind == CompletionSymbolKind::Function));
+        assert!(symbols.iter().any(|s| s.name == "Point" && s.kind == CompletionSymbolKind::Struct));
+        assert!(symbols.iter().any(|s| s.name == "Color" && s.kind == CompletionSymbolKind::Enum));
     }
 }

@@ -309,14 +309,44 @@ impl LanguageServer for CompactLanguageServer {
     /// Handle `textDocument/completion` request.
     ///
     /// Provides autocomplete suggestions for:
+    /// - Symbols defined in the current file (circuits, structs, etc.)
     /// - Keywords (circuit, ledger, struct, etc.)
     /// - Built-in types (Boolean, Field, Uint, etc.)
     /// - Snippets (circuit template, struct template, etc.)
     async fn completion(
         &self,
-        _params: CompletionParams,
+        params: CompletionParams,
     ) -> Result<Option<CompletionResponse>> {
         let mut items = Vec::new();
+        let uri = params.text_document_position.text_document.uri.to_string();
+
+        // Get symbols from the current document
+        if let Some(doc) = self.documents.get(&uri) {
+            let content = doc.content.to_string();
+            let symbols = {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.get_completion_symbols(&content)
+            };
+
+            for sym in symbols {
+                use compact_analyzer::CompletionSymbolKind;
+                let kind = match sym.kind {
+                    CompletionSymbolKind::Function => CompletionItemKind::FUNCTION,
+                    CompletionSymbolKind::Struct => CompletionItemKind::STRUCT,
+                    CompletionSymbolKind::Enum => CompletionItemKind::ENUM,
+                    CompletionSymbolKind::Variable => CompletionItemKind::VARIABLE,
+                    CompletionSymbolKind::Module => CompletionItemKind::MODULE,
+                };
+
+                items.push(CompletionItem {
+                    label: sym.name.clone(),
+                    kind: Some(kind),
+                    detail: sym.detail,
+                    insert_text: Some(sym.name),
+                    ..Default::default()
+                });
+            }
+        }
 
         // Keywords
         let keywords = [
