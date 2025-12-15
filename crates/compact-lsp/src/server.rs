@@ -12,7 +12,9 @@
 //! 4. Normal operation: file events, requests flow both directions
 //! 5. Editor sends `shutdown` request, we respond, then `exit` notification
 
+use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use dashmap::DashMap;
 use ropey::Rope;
@@ -21,7 +23,6 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::{Client, LanguageServer};
 
 use compact_analyzer::{CompletionSymbol, DiagnosticEngine, FormatterEngine, ParserEngine};
-use std::sync::Mutex;
 
 /// A document we're tracking (an open file in the editor).
 #[derive(Debug, Clone)]
@@ -70,6 +71,10 @@ pub struct CompactLanguageServer {
     /// Symbol cache for cross-file completion.
     /// Maps file URI -> symbols defined in that file.
     symbol_cache: Arc<DashMap<String, Vec<CompletionSymbol>>>,
+
+    /// Source cache for cross-file hover and definition.
+    /// Maps file URI -> source content.
+    source_cache: Arc<DashMap<String, String>>,
 }
 
 impl CompactLanguageServer {
@@ -101,6 +106,7 @@ impl CompactLanguageServer {
             parser_engine: Arc::new(Mutex::new(parser_engine)),
             workspace_root: Arc::new(Mutex::new(None)),
             symbol_cache: Arc::new(DashMap::new()),
+            source_cache: Arc::new(DashMap::new()),
         }
     }
 
@@ -175,16 +181,20 @@ impl CompactLanguageServer {
                     parser.get_completion_symbols(&content)
                 };
 
+                // Store in cache with file:// URI using canonical path
+                let canonical_path = std::path::Path::new(&file_path)
+                    .canonicalize()
+                    .ok()
+                    .and_then(|p| p.to_str().map(|s| s.to_string()))
+                    .unwrap_or(file_path.clone());
+                let uri = format!("file://{}", canonical_path);
+                tracing::debug!("Caching file: {}", uri);
+
+                // Always cache source content for hover/goto_definition
+                self.source_cache.insert(uri.clone(), content);
+
                 let symbol_count = symbols.len();
                 if symbol_count > 0 {
-                    // Store in cache with file:// URI using canonical path
-                    let canonical_path = std::path::Path::new(&file_path)
-                        .canonicalize()
-                        .ok()
-                        .and_then(|p| p.to_str().map(|s| s.to_string()))
-                        .unwrap_or(file_path.clone());
-                    let uri = format!("file://{}", canonical_path);
-                    tracing::debug!("Caching symbols for: {}", uri);
                     self.symbol_cache.insert(uri, symbols);
                     symbols_found += symbol_count;
                 }
@@ -230,12 +240,15 @@ impl CompactLanguageServer {
         Ok(())
     }
 
-    /// Update the symbol cache for a specific file.
+    /// Update the symbol and source cache for a specific file.
     fn update_symbol_cache(&self, uri: &str, content: &str) {
         let symbols = {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.get_completion_symbols(content)
         };
+
+        // Always update source cache for hover/goto_definition
+        self.source_cache.insert(uri.to_string(), content.to_string());
 
         if symbols.is_empty() {
             self.symbol_cache.remove(uri);
@@ -288,6 +301,247 @@ impl CompactLanguageServer {
             let normalized: std::path::PathBuf = components.iter().collect();
             normalized.to_str().map(|s| s.to_string())
         }
+    }
+
+    /// Get the word (identifier) at a given position in the source.
+    fn get_word_at_position(&self, content: &str, line: u32, character: u32) -> Option<String> {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_content = lines.get(line as usize)?;
+        let char_idx = character as usize;
+
+        // Check if position is within bounds
+        if char_idx > line_content.len() {
+            return None;
+        }
+
+        // Find word boundaries (identifiers can contain a-z, A-Z, 0-9, _)
+        let chars: Vec<char> = line_content.chars().collect();
+
+        // Find start of word
+        let mut start = char_idx;
+        while start > 0 {
+            let c = chars.get(start - 1)?;
+            if c.is_alphanumeric() || *c == '_' {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+
+        // Find end of word
+        let mut end = char_idx;
+        while end < chars.len() {
+            let c = chars.get(end)?;
+            if c.is_alphanumeric() || *c == '_' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+
+        if start == end {
+            return None;
+        }
+
+        Some(chars[start..end].iter().collect())
+    }
+
+    /// Find an imported symbol by name (with prefix handling).
+    ///
+    /// Given a name like "Utils_add", this checks if it matches any imported symbol
+    /// and returns the file URI and symbol if found.
+    fn find_imported_symbol(&self, current_uri: &str, name: &str) -> Option<(String, CompletionSymbol)> {
+        // Get imports from current file
+        let imports = {
+            let content = self.documents.get(current_uri)?.content.to_string();
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_imports(&content)
+        };
+
+        // Check each import to see if name matches prefix + symbol
+        for import in imports {
+            // Skip non-file imports
+            if !import.is_file {
+                continue;
+            }
+
+            // Must have a prefix to match
+            let prefix = match &import.prefix {
+                Some(p) => p,
+                None => continue,
+            };
+
+            // Check if name starts with the prefix
+            if !name.starts_with(prefix) {
+                continue;
+            }
+
+            // Strip prefix to get the actual symbol name
+            let symbol_name = &name[prefix.len()..];
+            if symbol_name.is_empty() {
+                continue;
+            }
+
+            // Resolve import path to file URI
+            let resolved_uri = match self.resolve_import_path(current_uri, &import.path) {
+                Some(uri) => uri,
+                None => continue,
+            };
+
+            // Look up symbol in cache
+            if let Some(symbols) = self.symbol_cache.get(&resolved_uri) {
+                for symbol in symbols.iter() {
+                    if symbol.name == symbol_name {
+                        return Some((resolved_uri, symbol.clone()));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Build a SignatureHelp response from SignatureInfo.
+    fn build_signature_help_response(&self, info: compact_analyzer::SignatureInfo) -> SignatureHelp {
+        let parameters: Vec<ParameterInformation> = info
+            .parameters
+            .iter()
+            .map(|p| ParameterInformation {
+                label: ParameterLabel::Simple(p.label.clone()),
+                documentation: None,
+            })
+            .collect();
+
+        let signature = SignatureInformation {
+            label: info.label,
+            documentation: info.documentation.map(|d| {
+                Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: d,
+                })
+            }),
+            parameters: Some(parameters),
+            active_parameter: Some(info.active_parameter),
+        };
+
+        SignatureHelp {
+            signatures: vec![signature],
+            active_signature: Some(0),
+            active_parameter: Some(info.active_parameter),
+        }
+    }
+
+    /// Get the function name from a call context (e.g., "func_name(" before cursor).
+    fn get_function_call_name(&self, content: &str, line: u32, character: u32) -> Option<String> {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_content = lines.get(line as usize)?;
+
+        // Search backwards from cursor to find the opening paren
+        let chars: Vec<char> = line_content.chars().collect();
+        let mut idx = character as usize;
+
+        // First, find the opening paren of our call (handling nested parens)
+        let mut paren_depth = 0;
+        while idx > 0 {
+            idx -= 1;
+            match chars.get(idx) {
+                Some(')') => paren_depth += 1,
+                Some('(') => {
+                    if paren_depth == 0 {
+                        // Found our opening paren - now get the identifier before it
+                        break;
+                    }
+                    paren_depth -= 1;
+                }
+                _ => {}
+            }
+        }
+
+        // Now idx points to '(' - search backwards for the function name
+        if idx == 0 {
+            return None;
+        }
+
+        // Skip any whitespace
+        while idx > 0 && chars.get(idx - 1).map(|c| c.is_whitespace()).unwrap_or(false) {
+            idx -= 1;
+        }
+
+        // Now find the identifier
+        let end = idx;
+        while idx > 0 && chars.get(idx - 1).map(|c| c.is_alphanumeric() || *c == '_').unwrap_or(false) {
+            idx -= 1;
+        }
+
+        if idx == end {
+            return None;
+        }
+
+        Some(chars[idx..end].iter().collect())
+    }
+
+    /// Count commas before cursor position in a function call.
+    fn count_commas_before_cursor(&self, content: &str, line: u32, character: u32) -> u32 {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_content = match lines.get(line as usize) {
+            Some(l) => *l,
+            None => return 0,
+        };
+
+        let chars: Vec<char> = line_content.chars().collect();
+        let cursor_idx = character as usize;
+        let mut comma_count = 0;
+        let mut paren_depth = 0;
+
+        // Search backwards from cursor to find commas (not inside nested parens)
+        let mut idx = cursor_idx;
+        while idx > 0 {
+            idx -= 1;
+            match chars.get(idx) {
+                Some(')') => paren_depth += 1,
+                Some('(') => {
+                    if paren_depth == 0 {
+                        // Found our function call's opening paren
+                        break;
+                    }
+                    paren_depth -= 1;
+                }
+                Some(',') if paren_depth == 0 => comma_count += 1,
+                _ => {}
+            }
+        }
+
+        comma_count
+    }
+
+    /// Parse parameter strings from a detail string like "(a: Field, b: Field): ReturnType".
+    fn parse_params_from_detail(&self, detail: &str) -> Vec<String> {
+        // Extract content between first '(' and matching ')'
+        let start = match detail.find('(') {
+            Some(i) => i + 1,
+            None => return vec![],
+        };
+
+        let end = match detail.find(')') {
+            Some(i) => i,
+            None => return vec![],
+        };
+
+        if start >= end {
+            return vec![];
+        }
+
+        let params_str = &detail[start..end];
+        if params_str.trim().is_empty() {
+            return vec![];
+        }
+
+        // Split by comma, handling potential nested types
+        params_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     }
 }
 
@@ -985,28 +1239,55 @@ impl LanguageServer for CompactLanguageServer {
             }
         };
 
-        // Get hover info from parser
+        // First, try local hover info from parser
         let hover_info = {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.hover_info(&content, position.line, position.character)
         };
 
-        match hover_info {
-            Some(info) => {
-                tracing::debug!("Hover info found");
-                Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: info.content,
-                    }),
-                    range: info.range,
-                }))
-            }
-            None => {
-                tracing::debug!("No hover info at position");
-                Ok(None)
-            }
+        if let Some(info) = hover_info {
+            tracing::debug!("Local hover info found");
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: info.content,
+                }),
+                range: info.range,
+            }));
         }
+
+        // No local hover - check if it's an imported symbol
+        let word = match self.get_word_at_position(&content, position.line, position.character) {
+            Some(w) => w,
+            None => {
+                tracing::debug!("No word at position");
+                return Ok(None);
+            }
+        };
+
+        tracing::debug!("Checking imported symbols for: {}", word);
+
+        // Try to find the symbol in imported files
+        if let Some((_file_uri, symbol)) = self.find_imported_symbol(&uri, &word) {
+            tracing::debug!("Found imported symbol: {} from {:?}", symbol.name, _file_uri);
+            let content = symbol.documentation.unwrap_or_else(|| {
+                format!(
+                    "```compact\n{}{}\n```",
+                    symbol.name,
+                    symbol.detail.as_deref().unwrap_or("")
+                )
+            });
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: content,
+                }),
+                range: None,
+            }));
+        }
+
+        tracing::debug!("No hover info at position");
+        Ok(None)
     }
 
     /// Handle `textDocument/definition` request.
@@ -1017,11 +1298,12 @@ impl LanguageServer for CompactLanguageServer {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = params.text_document_position_params.text_document.uri.clone();
+        let uri_string = uri.to_string();
         let position = params.text_document_position_params.position;
         tracing::debug!("Go to definition requested for: {:?} at {:?}", uri, position);
 
         // Get the document content
-        let content = match self.documents.get(&uri.to_string()) {
+        let content = match self.documents.get(&uri_string) {
             Some(doc) => doc.content.to_string(),
             None => {
                 tracing::warn!("Document not found: {:?}", uri);
@@ -1029,25 +1311,60 @@ impl LanguageServer for CompactLanguageServer {
             }
         };
 
-        // Get definition location from parser
+        // First, try local definition from parser
         let def_location = {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.goto_definition(&content, position.line, position.character)
         };
 
-        match def_location {
-            Some(loc) => {
-                tracing::debug!("Definition found at {:?}", loc.selection_range);
-                Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                    uri,
-                    range: loc.selection_range,
-                })))
-            }
+        if let Some(loc) = def_location {
+            tracing::debug!("Local definition found at {:?}", loc.selection_range);
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                uri,
+                range: loc.selection_range,
+            })));
+        }
+
+        // No local definition - check if it's an imported symbol
+        let word = match self.get_word_at_position(&content, position.line, position.character) {
+            Some(w) => w,
             None => {
-                tracing::debug!("No definition found");
-                Ok(None)
+                tracing::debug!("No word at position");
+                return Ok(None);
+            }
+        };
+
+        tracing::debug!("Checking imported symbols for: {}", word);
+
+        // Try to find the symbol in imported files
+        if let Some((file_uri, symbol)) = self.find_imported_symbol(&uri_string, &word) {
+            if let Some(loc) = symbol.location {
+                tracing::debug!("Found imported symbol: {} in {}", symbol.name, file_uri);
+                let target_uri = match Uri::from_str(&file_uri) {
+                    Ok(u) => u,
+                    Err(_) => {
+                        tracing::warn!("Invalid URI: {}", file_uri);
+                        return Ok(None);
+                    }
+                };
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: target_uri,
+                    range: Range {
+                        start: Position {
+                            line: loc.start_line,
+                            character: loc.start_char,
+                        },
+                        end: Position {
+                            line: loc.end_line,
+                            character: loc.end_char,
+                        },
+                    },
+                })));
             }
         }
+
+        tracing::debug!("No definition found");
+        Ok(None)
     }
 
     /// Handle `textDocument/signatureHelp` request.
@@ -1070,48 +1387,71 @@ impl LanguageServer for CompactLanguageServer {
             }
         };
 
-        // Get signature info from parser
+        // First, try local signature help from parser
         let sig_info = {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.signature_help(&content, position.line, position.character)
         };
 
-        match sig_info {
-            Some(info) => {
-                tracing::debug!("Signature help found: {}", info.label);
+        if let Some(info) = sig_info {
+            tracing::debug!("Local signature help found: {}", info.label);
+            return Ok(Some(self.build_signature_help_response(info)));
+        }
 
-                // Convert parameters to LSP format
-                let parameters: Vec<ParameterInformation> = info
-                    .parameters
+        // No local signature help - check if we're inside an imported function call
+        // Try to find the function name from the call context
+        let func_name = match self.get_function_call_name(&content, position.line, position.character) {
+            Some(name) => name,
+            None => {
+                tracing::debug!("No function call context at position");
+                return Ok(None);
+            }
+        };
+
+        tracing::debug!("Checking imported symbols for function: {}", func_name);
+
+        // Try to find the symbol in imported files
+        if let Some((_file_uri, symbol)) = self.find_imported_symbol(&uri, &func_name) {
+            tracing::debug!("Found imported symbol: {} from {:?}", symbol.name, _file_uri);
+
+            // Build signature from the cached symbol's detail
+            if let Some(detail) = &symbol.detail {
+                // Count commas before cursor to determine active parameter
+                let active_param = self.count_commas_before_cursor(&content, position.line, position.character);
+
+                // Parse parameters from detail string like "(a: Field, b: Field): ReturnType"
+                let params = self.parse_params_from_detail(detail);
+
+                let parameters: Vec<ParameterInformation> = params
                     .iter()
                     .map(|p| ParameterInformation {
-                        label: ParameterLabel::Simple(p.label.clone()),
+                        label: ParameterLabel::Simple(p.clone()),
                         documentation: None,
                     })
                     .collect();
 
+                let label = format!("circuit {}{}", func_name, detail);
                 let signature = SignatureInformation {
-                    label: info.label,
-                    documentation: info.documentation.map(|d| {
+                    label,
+                    documentation: symbol.documentation.map(|d| {
                         Documentation::MarkupContent(MarkupContent {
                             kind: MarkupKind::Markdown,
                             value: d,
                         })
                     }),
                     parameters: Some(parameters),
-                    active_parameter: Some(info.active_parameter),
+                    active_parameter: Some(active_param),
                 };
 
-                Ok(Some(SignatureHelp {
+                return Ok(Some(SignatureHelp {
                     signatures: vec![signature],
                     active_signature: Some(0),
-                    active_parameter: Some(info.active_parameter),
-                }))
-            }
-            None => {
-                tracing::debug!("No signature help at position");
-                Ok(None)
+                    active_parameter: Some(active_param),
+                }));
             }
         }
+
+        tracing::debug!("No signature help at position");
+        Ok(None)
     }
 }

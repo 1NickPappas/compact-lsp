@@ -59,6 +59,19 @@ pub enum CompletionSymbolKind {
     Module,
 }
 
+/// Location of a symbol in the source code.
+#[derive(Debug, Clone)]
+pub struct SymbolLocation {
+    /// Start line (0-based).
+    pub start_line: u32,
+    /// Start character (0-based).
+    pub start_char: u32,
+    /// End line (0-based).
+    pub end_line: u32,
+    /// End character (0-based).
+    pub end_char: u32,
+}
+
 /// A symbol for completion.
 #[derive(Debug, Clone)]
 pub struct CompletionSymbol {
@@ -68,6 +81,10 @@ pub struct CompletionSymbol {
     pub kind: CompletionSymbolKind,
     /// Detail text (e.g., "(a: Field, b: Field): Field").
     pub detail: Option<String>,
+    /// Location of the symbol definition.
+    pub location: Option<SymbolLocation>,
+    /// Documentation for the symbol.
+    pub documentation: Option<String>,
 }
 
 /// Information about an import statement.
@@ -318,6 +335,18 @@ impl ParserEngine {
                 line: end.row as u32,
                 character: end.column as u32,
             },
+        }
+    }
+
+    /// Convert tree-sitter node position to SymbolLocation.
+    fn node_to_symbol_location(&self, node: Node) -> SymbolLocation {
+        let start = node.start_position();
+        let end = node.end_position();
+        SymbolLocation {
+            start_line: start.row as u32,
+            start_char: start.column as u32,
+            end_line: end.row as u32,
+            end_char: end.column as u32,
         }
     }
 
@@ -1017,10 +1046,14 @@ impl ParserEngine {
                     let params = self.extract_params(node, source);
                     let return_type = self.get_type_text(node, source).unwrap_or_default();
                     let detail = format!("({}): {}", params, return_type);
+                    let location = self.node_to_symbol_location(node);
+                    let doc = format!("Circuit function\n\n```compact\ncircuit {}{}\n```", name, detail);
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Function,
                         detail: Some(detail),
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
@@ -1030,10 +1063,14 @@ impl ParserEngine {
                     let params = self.extract_params(node, source);
                     let return_type = self.get_type_text(node, source).unwrap_or_default();
                     let detail = format!("({}): {}", params, return_type);
+                    let location = self.node_to_symbol_location(node);
+                    let doc = format!("External circuit\n\n```compact\ncircuit {}{}\n```", name, detail);
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Function,
                         detail: Some(detail),
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
@@ -1043,30 +1080,52 @@ impl ParserEngine {
                     let params = self.extract_params(node, source);
                     let return_type = self.get_type_text(node, source).unwrap_or_default();
                     let detail = format!("({}): {}", params, return_type);
+                    let location = self.node_to_symbol_location(node);
+                    let doc = format!("Witness function\n\n```compact\nwitness {}{}\n```", name, detail);
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Function,
                         detail: Some(detail),
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
             // Struct definitions
             "struct" => {
                 if let Some(name) = self.get_field_text(node, "name", source) {
+                    let location = self.node_to_symbol_location(node);
+                    let fields = self.extract_struct_fields(node, source);
+                    let doc = if fields.is_empty() {
+                        format!("Struct type\n\n```compact\nstruct {}\n```", name)
+                    } else {
+                        format!("Struct type\n\n```compact\nstruct {}\n```\n\nFields:\n{}", name, fields.join("\n"))
+                    };
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Struct,
                         detail: Some("struct".to_string()),
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
             // Enum definitions
             "enumdef" => {
                 if let Some(name) = self.get_field_text(node, "name", source) {
+                    let location = self.node_to_symbol_location(node);
+                    let variants = self.extract_enum_variants(node, source);
+                    let doc = if variants.is_empty() {
+                        format!("Enum type\n\n```compact\nenum {}\n```", name)
+                    } else {
+                        format!("Enum type\n\n```compact\nenum {}\n```\n\nVariants: {}", name, variants.join(", "))
+                    };
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Enum,
                         detail: Some("enum".to_string()),
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
@@ -1074,20 +1133,33 @@ impl ParserEngine {
             "ldecl" => {
                 if let Some(name) = self.get_field_text(node, "name", source) {
                     let type_text = self.get_field_text(node, "type", source);
+                    let location = self.node_to_symbol_location(node);
+                    let detail = type_text.as_ref().map(|t| format!("ledger: {}", t));
+                    let doc = format!(
+                        "Ledger state\n\n```compact\nledger {}: {}\n```",
+                        name,
+                        type_text.as_deref().unwrap_or("unknown")
+                    );
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Variable,
-                        detail: type_text.map(|t| format!("ledger: {}", t)),
+                        detail,
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
             // Module definitions
             "mdefn" => {
                 if let Some(name) = self.get_field_text(node, "name", source) {
+                    let location = self.node_to_symbol_location(node);
+                    let doc = format!("Module namespace\n\n```compact\nmodule {}\n```", name);
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Module,
                         detail: Some("module".to_string()),
+                        location: Some(location),
+                        documentation: Some(doc),
                     });
                 }
             }
