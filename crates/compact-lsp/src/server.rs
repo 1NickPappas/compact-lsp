@@ -135,8 +135,17 @@ impl LanguageServer for CompactLanguageServer {
                         ..Default::default()
                     },
                 )),
+                // Completion provider for autocomplete
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![
+                        ".".to_string(),  // Member access
+                        ":".to_string(),  // Type annotations
+                        "<".to_string(),  // Generic parameters
+                    ]),
+                    resolve_provider: Some(false),
+                    ..Default::default()
+                }),
                 // We'll add more capabilities as we implement features:
-                // - completion_provider: for autocomplete
                 // - hover_provider: for hover information
                 // - definition_provider: for go-to-definition
                 // - document_formatting_provider: for format on save
@@ -262,5 +271,222 @@ impl LanguageServer for CompactLanguageServer {
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;
+    }
+
+    /// Handle `textDocument/completion` request.
+    ///
+    /// Provides autocomplete suggestions for:
+    /// - Keywords (circuit, ledger, struct, etc.)
+    /// - Built-in types (Boolean, Field, Uint, etc.)
+    /// - Snippets (circuit template, struct template, etc.)
+    async fn completion(
+        &self,
+        _params: CompletionParams,
+    ) -> Result<Option<CompletionResponse>> {
+        let mut items = Vec::new();
+
+        // Keywords
+        let keywords = [
+            ("pragma", "Version pragma declaration"),
+            ("import", "Import a module"),
+            ("export", "Export a declaration"),
+            ("module", "Define a module"),
+            ("include", "Include a file"),
+            ("ledger", "Declare ledger state"),
+            ("circuit", "Define a circuit function"),
+            ("witness", "Declare a witness function"),
+            ("contract", "Declare an external contract"),
+            ("struct", "Define a struct type"),
+            ("enum", "Define an enum type"),
+            ("constructor", "Define a constructor"),
+            ("return", "Return from function"),
+            ("if", "Conditional statement"),
+            ("else", "Else branch"),
+            ("for", "For loop"),
+            ("of", "Iterator/range keyword"),
+            ("assert", "Assertion with error message"),
+            ("const", "Constant declaration"),
+            ("default", "Default value"),
+            ("map", "Map over values"),
+            ("fold", "Fold/reduce values"),
+            ("disclose", "Disclose a value"),
+            ("pad", "Pad a string"),
+            ("as", "Type cast"),
+            ("pure", "Pure function modifier"),
+            ("sealed", "Sealed ledger modifier"),
+            ("prefix", "Import prefix"),
+        ];
+
+        for (keyword, detail) in keywords {
+            items.push(CompletionItem {
+                label: keyword.to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some(detail.to_string()),
+                insert_text: Some(keyword.to_string()),
+                ..Default::default()
+            });
+        }
+
+        // Built-in types
+        let types = [
+            ("Boolean", "Boolean type (true/false)"),
+            ("Field", "Field arithmetic type"),
+            ("Uint", "Unsigned integer with bit size"),
+            ("Bytes", "Fixed-size byte array"),
+            ("Opaque", "Opaque type wrapper"),
+            ("Vector", "Fixed-size vector"),
+        ];
+
+        for (type_name, detail) in types {
+            items.push(CompletionItem {
+                label: type_name.to_string(),
+                kind: Some(CompletionItemKind::TYPE_PARAMETER),
+                detail: Some(detail.to_string()),
+                insert_text: Some(type_name.to_string()),
+                ..Default::default()
+            });
+        }
+
+        // Type snippets with parameters
+        let type_snippets = [
+            ("Uint<>", "Uint<${1:32}>", "Unsigned integer (e.g., Uint<32>)"),
+            ("Bytes<>", "Bytes<${1:32}>", "Byte array (e.g., Bytes<32>)"),
+            ("Vector<>", "Vector<${1:10}, ${2:Field}>", "Vector (e.g., Vector<10, Field>)"),
+            ("Opaque<>", "Opaque<\"${1:name}\">", "Opaque type (e.g., Opaque<\"mytype\">)"),
+        ];
+
+        for (label, snippet, detail) in type_snippets {
+            items.push(CompletionItem {
+                label: label.to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some(detail.to_string()),
+                insert_text: Some(snippet.to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            });
+        }
+
+        // Boolean literals
+        items.push(CompletionItem {
+            label: "true".to_string(),
+            kind: Some(CompletionItemKind::CONSTANT),
+            detail: Some("Boolean true".to_string()),
+            ..Default::default()
+        });
+        items.push(CompletionItem {
+            label: "false".to_string(),
+            kind: Some(CompletionItemKind::CONSTANT),
+            detail: Some("Boolean false".to_string()),
+            ..Default::default()
+        });
+
+        // Code snippets
+        let snippets = [
+            (
+                "circuit",
+                "circuit snippet",
+                "circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Circuit function template",
+            ),
+            (
+                "export circuit",
+                "export circuit snippet",
+                "export circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Exported circuit function template",
+            ),
+            (
+                "pure circuit",
+                "pure circuit snippet",
+                "export pure circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Pure circuit function template",
+            ),
+            (
+                "struct",
+                "struct snippet",
+                "struct ${1:Name} {\n\t${2:field}: ${3:Type};\n}",
+                "Struct definition template",
+            ),
+            (
+                "export struct",
+                "export struct snippet",
+                "export struct ${1:Name} {\n\t${2:field}: ${3:Type};\n}",
+                "Exported struct definition template",
+            ),
+            (
+                "enum",
+                "enum snippet",
+                "enum ${1:Name} {\n\t${2:Variant1},\n\t${3:Variant2},\n}",
+                "Enum definition template",
+            ),
+            (
+                "ledger",
+                "ledger snippet",
+                "ledger ${1:name}: ${2:Type};",
+                "Ledger declaration template",
+            ),
+            (
+                "witness",
+                "witness snippet",
+                "witness ${1:name}(${2:params}): ${3:ReturnType};",
+                "Witness declaration template",
+            ),
+            (
+                "constructor",
+                "constructor snippet",
+                "constructor(${1:params}) {\n\t$0\n}",
+                "Constructor template",
+            ),
+            (
+                "if",
+                "if snippet",
+                "if (${1:condition}) {\n\t$0\n}",
+                "If statement template",
+            ),
+            (
+                "if-else",
+                "if-else snippet",
+                "if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}",
+                "If-else statement template",
+            ),
+            (
+                "for",
+                "for snippet",
+                "for (const ${1:i} of ${2:0}..${3:10}) {\n\t$0\n}",
+                "For loop template",
+            ),
+            (
+                "assert",
+                "assert snippet",
+                "assert ${1:condition} \"${2:error message}\";",
+                "Assertion template",
+            ),
+            (
+                "pragma",
+                "pragma snippet",
+                "pragma ${1:compact} ${2:>=0.1.0};",
+                "Pragma declaration template",
+            ),
+            (
+                "import",
+                "import snippet",
+                "import ${1:Module};",
+                "Import statement template",
+            ),
+        ];
+
+        for (label, filter, snippet, detail) in snippets {
+            items.push(CompletionItem {
+                label: label.to_string(),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some(detail.to_string()),
+                filter_text: Some(filter.to_string()),
+                insert_text: Some(snippet.to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            });
+        }
+
+        tracing::debug!("Returning {} completion items", items.len());
+        Ok(Some(CompletionResponse::Array(items)))
     }
 }

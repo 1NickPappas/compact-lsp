@@ -4,8 +4,27 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 
 ## Features
 
-- **Diagnostics** - Shows compiler errors and warnings from `compactc`
-- **Document Sync** - Tracks file changes for real-time feedback
+### Implemented
+
+| Feature | Description |
+|---------|-------------|
+| Diagnostics | Shows compiler errors and warnings from `compactc` on save |
+| Document Sync | Tracks file changes with incremental updates |
+| Completion | Keywords, built-in types, and snippet templates |
+
+### Roadmap
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Formatting | Planned | Format on save (requires format-compact) |
+| Document Symbols | Planned | Outline view of functions, types, etc. |
+| Semantic Tokens | Planned | Rich syntax highlighting via LSP |
+| Hover | Planned | Type info and documentation on hover |
+| Go to Definition | Planned | Navigate to symbol definitions |
+| Find References | Planned | Find all usages of a symbol |
+| Rename | Planned | Rename symbols across files |
+| Signature Help | Planned | Function parameter hints while typing |
+| Code Actions | Planned | Quick fixes and refactoring |
 
 ## Requirements
 
@@ -72,6 +91,11 @@ The LSP auto-detects `compactc.bin` in this order:
 1. `COMPACT_COMPILER` environment variable
 2. `~/compactc/compactc.bin`
 3. `compactc.bin` in PATH
+
+## Related Projects
+
+- [compact.vim](../compact.vim) - Vim/Neovim syntax highlighting and filetype support
+- [tree-sitter-compact](https://github.com/midnight-ntwrk/tree-sitter-compact) - Tree-sitter grammar for Compact
 
 ## License
 
