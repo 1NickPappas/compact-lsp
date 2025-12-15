@@ -14,13 +14,13 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 | Formatting | Format document using `format-compact` |
 | Document Symbols | Outline view of circuits, structs, enums, modules, etc. |
 | Folding Ranges | Code folding for blocks, functions, control flow |
+| Hover | Documentation for keywords, types, and symbol signatures |
 
 ### Roadmap
 
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Semantic Tokens | Planned | Rich syntax highlighting via LSP |
-| Hover | Planned | Type info and documentation on hover |
 | Go to Definition | Planned | Navigate to symbol definitions |
 | Find References | Planned | Find all usages of a symbol |
 | Rename | Planned | Rename symbols across files |

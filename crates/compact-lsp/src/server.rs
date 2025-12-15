@@ -172,8 +172,9 @@ impl LanguageServer for CompactLanguageServer {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 // Folding ranges provider
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                // Hover provider for documentation and type info
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 // We'll add more capabilities as we implement features:
-                // - hover_provider: for hover information
                 // - definition_provider: for go-to-definition
                 ..Default::default()
             },
@@ -635,5 +636,49 @@ impl LanguageServer for CompactLanguageServer {
 
         tracing::debug!("Found {} folding ranges", ranges.len());
         Ok(Some(ranges))
+    }
+
+    /// Handle `textDocument/hover` request.
+    ///
+    /// Returns hover information for the element at the cursor position.
+    /// This includes:
+    /// - Documentation for keywords and built-in types
+    /// - Signatures for circuits, witnesses, structs, etc.
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let position = params.text_document_position_params.position;
+        tracing::debug!("Hover requested for: {} at {:?}", uri, position);
+
+        // Get the document content
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => {
+                tracing::warn!("Document not found: {}", uri);
+                return Ok(None);
+            }
+        };
+
+        // Get hover info from parser
+        let hover_info = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.hover_info(&content, position.line, position.character)
+        };
+
+        match hover_info {
+            Some(info) => {
+                tracing::debug!("Hover info found");
+                Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: info.content,
+                    }),
+                    range: info.range,
+                }))
+            }
+            None => {
+                tracing::debug!("No hover info at position");
+                Ok(None)
+            }
+        }
     }
 }

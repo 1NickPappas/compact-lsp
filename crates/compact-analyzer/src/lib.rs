@@ -15,4 +15,4 @@ pub mod parser;
 
 pub use diagnostics::DiagnosticEngine;
 pub use formatter::FormatterEngine;
-pub use parser::ParserEngine;
+pub use parser::{HoverInfo, ParserEngine};
