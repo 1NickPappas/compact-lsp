@@ -313,7 +313,7 @@ impl CompactLanguageServer {
                 if let Some(imported_uri) = imports::resolve_import_path(uri, &import.path) {
                     self.reverse_dependencies
                         .entry(imported_uri)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(uri.to_string());
                 }
             }

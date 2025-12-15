@@ -285,6 +285,7 @@ impl ParserEngine {
     }
 
     /// Recursively collect folding ranges.
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_folding_ranges(&self, node: Node, ranges: &mut Vec<FoldingRange>) {
         let kind = node.kind();
 
@@ -754,12 +755,13 @@ impl ParserEngine {
                 let start = node.start_position();
                 let end = node.end_position();
 
-                if cursor_point.row > start.row ||
-                   (cursor_point.row == start.row && cursor_point.column >= start.column) {
-                    if cursor_point.row < end.row + 1 ||
-                       (cursor_point.row == end.row && cursor_point.column <= end.column + 10) {
-                        return Some((node, name));
-                    }
+                let after_start = cursor_point.row > start.row
+                    || (cursor_point.row == start.row && cursor_point.column >= start.column);
+                let before_end = cursor_point.row < end.row + 1
+                    || (cursor_point.row == end.row && cursor_point.column <= end.column + 10);
+
+                if after_start && before_end {
+                    return Some((node, name));
                 }
             }
         }
@@ -847,13 +849,13 @@ impl ParserEngine {
         let mut cursor = args_node.walk();
 
         for child in args_node.children(&mut cursor) {
-            if child.kind() == "," {
-                if child.start_position().row < cursor_point.row
-                    || (child.start_position().row == cursor_point.row
-                        && child.start_position().column < cursor_point.column)
-                {
-                    count += 1;
-                }
+            let is_comma = child.kind() == ",";
+            let before_cursor = child.start_position().row < cursor_point.row
+                || (child.start_position().row == cursor_point.row
+                    && child.start_position().column < cursor_point.column);
+
+            if is_comma && before_cursor {
+                count += 1;
             }
         }
 
