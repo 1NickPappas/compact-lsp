@@ -80,6 +80,11 @@ pub struct CompactLanguageServer {
     /// Maps file URI -> task handle for debounced compiler diagnostics.
     /// When a new change comes in, we cancel the pending task and schedule a new one.
     pending_diagnostics: Arc<DashMap<String, tokio::task::JoinHandle<()>>>,
+
+    /// Reverse dependency map for cross-file error propagation.
+    /// Maps file URI -> list of files that import it.
+    /// When a file changes, we re-diagnose all files that depend on it.
+    reverse_dependencies: Arc<DashMap<String, Vec<String>>>,
 }
 
 impl CompactLanguageServer {
@@ -113,29 +118,58 @@ impl CompactLanguageServer {
             symbol_cache: Arc::new(DashMap::new()),
             source_cache: Arc::new(DashMap::new()),
             pending_diagnostics: Arc::new(DashMap::new()),
+            reverse_dependencies: Arc::new(DashMap::new()),
         }
     }
 
     /// Publish diagnostics for a document.
     ///
     /// This is called after file save to show compiler errors in the editor.
+    /// Merges syntax errors (tree-sitter) with compiler errors.
     async fn publish_diagnostics(&self, uri: Uri) {
         // Get the document content
         let content = match self.documents.get(&uri.to_string()) {
             Some(doc) => doc.content.to_string(),
-            None => return,
+            None => {
+                // For dependent files that aren't open, read from disk
+                let path = uri.path().as_str();
+                match std::fs::read_to_string(path) {
+                    Ok(content) => content,
+                    Err(_) => return,
+                }
+            }
+        };
+
+        // Get syntax errors from tree-sitter
+        let syntax_diagnostics: Vec<Diagnostic> = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser
+                .get_syntax_errors(&content)
+                .into_iter()
+                .map(|e| Diagnostic {
+                    range: e.range,
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("compact-syntax".to_string()),
+                    message: e.message,
+                    ..Default::default()
+                })
+                .collect()
         };
 
         // Run the compiler and get diagnostics
-        let diagnostics = self
+        let compiler_diagnostics = self
             .diagnostic_engine
             .diagnose(&uri.to_string(), &content)
             .await;
 
+        // Merge both: syntax errors + compiler errors
+        let mut all_diagnostics = syntax_diagnostics;
+        all_diagnostics.extend(compiler_diagnostics);
+
         // Send diagnostics to the editor
         // The third parameter is the document version (None = latest)
         self.client
-            .publish_diagnostics(uri, diagnostics, None)
+            .publish_diagnostics(uri, all_diagnostics, None)
             .await;
     }
 
@@ -179,6 +213,9 @@ impl CompactLanguageServer {
     /// This schedules a compiler run after a 500ms delay. If another change
     /// comes in before the delay expires, the pending task is cancelled and
     /// a new one is scheduled. This prevents excessive compiler runs while typing.
+    ///
+    /// The published diagnostics MERGE syntax errors (from tree-sitter) with
+    /// compiler errors, so both are visible.
     async fn schedule_semantic_diagnostics(&self, uri: Uri, content: String) {
         let uri_string = uri.to_string();
 
@@ -191,6 +228,7 @@ impl CompactLanguageServer {
         // Clone what we need for the spawned task
         let client = self.client.clone();
         let diagnostic_engine = self.diagnostic_engine.clone();
+        let parser_engine = self.parser_engine.clone();
         let pending = self.pending_diagnostics.clone();
         let uri_clone = uri_string.clone();
 
@@ -199,11 +237,31 @@ impl CompactLanguageServer {
             // Wait before running compiler
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-            // Run compiler diagnostics
-            let diagnostics = diagnostic_engine.diagnose_content(&uri_clone, &content).await;
+            // Get syntax errors from tree-sitter (re-parse to get latest state)
+            let syntax_diagnostics: Vec<Diagnostic> = {
+                let mut parser = parser_engine.lock().unwrap();
+                parser
+                    .get_syntax_errors(&content)
+                    .into_iter()
+                    .map(|e| Diagnostic {
+                        range: e.range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("compact-syntax".to_string()),
+                        message: e.message,
+                        ..Default::default()
+                    })
+                    .collect()
+            };
 
-            // Publish results
-            client.publish_diagnostics(uri, diagnostics, None).await;
+            // Get compiler diagnostics
+            let compiler_diagnostics = diagnostic_engine.diagnose_content(&uri_clone, &content).await;
+
+            // Merge both: syntax errors + compiler errors
+            let mut all_diagnostics = syntax_diagnostics;
+            all_diagnostics.extend(compiler_diagnostics);
+
+            // Publish merged results
+            client.publish_diagnostics(uri, all_diagnostics, None).await;
 
             // Remove ourselves from pending map
             pending.remove(&uri_clone);
@@ -270,13 +328,16 @@ impl CompactLanguageServer {
                 tracing::debug!("Caching file: {}", uri);
 
                 // Always cache source content for hover/goto_definition
-                self.source_cache.insert(uri.clone(), content);
+                self.source_cache.insert(uri.clone(), content.clone());
 
                 let symbol_count = symbols.len();
                 if symbol_count > 0 {
-                    self.symbol_cache.insert(uri, symbols);
+                    self.symbol_cache.insert(uri.clone(), symbols);
                     symbols_found += symbol_count;
                 }
+
+                // Build reverse dependency map: parse imports and record dependencies
+                self.update_reverse_dependencies(&uri, &content);
 
                 files_found += 1;
             }
@@ -287,6 +348,10 @@ impl CompactLanguageServer {
             files_found,
             symbols_found
         );
+
+        // Log reverse dependency stats
+        let dep_count: usize = self.reverse_dependencies.iter().map(|e| e.value().len()).sum();
+        tracing::info!("Reverse dependencies: {} entries", dep_count);
     }
 
     /// Recursively find all .compact files in a directory.
@@ -334,6 +399,54 @@ impl CompactLanguageServer {
         } else {
             self.symbol_cache.insert(uri.to_string(), symbols);
         }
+    }
+
+    /// Update reverse dependencies for a file based on its imports.
+    ///
+    /// This parses the file's imports and records this file as a dependent
+    /// of each imported file. Used for cross-file error propagation.
+    fn update_reverse_dependencies(&self, uri: &str, content: &str) {
+        // First, remove old dependencies for this file
+        self.remove_reverse_dependencies(uri);
+
+        // Parse imports from the content
+        let imports = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_imports(content)
+        };
+
+        // For each import, add this file as a dependent
+        for import in imports {
+            // Only track file imports (not standard library imports)
+            if import.is_file {
+                if let Some(imported_uri) = self.resolve_import_path(uri, &import.path) {
+                    self.reverse_dependencies
+                        .entry(imported_uri)
+                        .or_insert_with(Vec::new)
+                        .push(uri.to_string());
+                }
+            }
+        }
+    }
+
+    /// Remove a file from all reverse dependency lists.
+    ///
+    /// Called before updating dependencies when a file's imports change.
+    fn remove_reverse_dependencies(&self, uri: &str) {
+        // Iterate over all entries and remove this file from their dependent lists
+        for mut entry in self.reverse_dependencies.iter_mut() {
+            entry.value_mut().retain(|dep| dep != uri);
+        }
+        // Clean up empty entries
+        self.reverse_dependencies.retain(|_, deps| !deps.is_empty());
+    }
+
+    /// Get all files that depend on (import) the given file.
+    fn get_dependents(&self, uri: &str) -> Vec<String> {
+        self.reverse_dependencies
+            .get(uri)
+            .map(|deps| deps.value().clone())
+            .unwrap_or_default()
     }
 
     /// Resolve an import path relative to the current file.
@@ -824,15 +937,31 @@ impl LanguageServer for CompactLanguageServer {
         let uri_str = uri.to_string();
         tracing::debug!("Document saved: {:?}", uri);
 
-        // Update symbol cache for this file
+        // Update symbol cache and reverse dependencies for this file
         if let Some(doc) = self.documents.get(&uri_str) {
             let content = doc.content.to_string();
             self.update_symbol_cache(&uri_str, &content);
-            tracing::debug!("Symbol cache updated for: {}", uri_str);
+            self.update_reverse_dependencies(&uri_str, &content);
+            tracing::debug!("Symbol cache and dependencies updated for: {}", uri_str);
         }
 
-        // Run diagnostics
+        // Run diagnostics for this file
         self.publish_diagnostics(uri).await;
+
+        // Re-diagnose all files that import this file (cross-file error propagation)
+        let dependents = self.get_dependents(&uri_str);
+        if !dependents.is_empty() {
+            tracing::debug!(
+                "Re-diagnosing {} dependent files for: {}",
+                dependents.len(),
+                uri_str
+            );
+            for dependent_uri in dependents {
+                if let Ok(dep_uri) = dependent_uri.parse::<Uri>() {
+                    self.publish_diagnostics(dep_uri).await;
+                }
+            }
+        }
     }
 
     /// Handle `textDocument/didClose` notification.

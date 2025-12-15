@@ -1596,4 +1596,30 @@ circuit add(a: Field, b: Field): Field {
         let errors = parser.get_syntax_errors(source);
         assert!(!errors.is_empty(), "Invalid identifier should produce syntax error");
     }
+
+    #[test]
+    fn test_syntax_errors_multiple() {
+        let mut parser = ParserEngine::new();
+        // Multiple syntax errors in different circuits
+        let source = r#"
+circuit broken1( {
+    return 1;
+}
+
+circuit broken2(): Field
+    return 2;
+}
+
+circuit broken3 {
+    return 3;
+}
+"#;
+        let errors = parser.get_syntax_errors(source);
+        // Should find multiple syntax errors, not just the first one
+        println!("Found {} syntax errors:", errors.len());
+        for (i, err) in errors.iter().enumerate() {
+            println!("  {}: {} at line {}", i + 1, err.message, err.range.start.line + 1);
+        }
+        assert!(errors.len() >= 2, "Should find multiple syntax errors, found {}", errors.len());
+    }
 }
