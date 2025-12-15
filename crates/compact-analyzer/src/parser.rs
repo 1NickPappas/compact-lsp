@@ -69,6 +69,18 @@ pub struct CompletionSymbol {
     /// Detail text (e.g., "(a: Field, b: Field): Field").
     pub detail: Option<String>,
 }
+
+/// Information about an import statement.
+#[derive(Debug, Clone)]
+pub struct ImportInfo {
+    /// The import path (e.g., "../utils/Utils" or "CompactStandardLibrary").
+    pub path: String,
+    /// True if this is a file import (quoted path), false if it's an identifier import.
+    pub is_file: bool,
+    /// The prefix for imported symbols (e.g., "Utils_").
+    pub prefix: Option<String>,
+}
+
 use tree_sitter::{Node, Parser, Tree};
 
 /// Parser engine wrapping tree-sitter-compact.
@@ -1088,6 +1100,78 @@ impl ParserEngine {
             self.collect_completion_symbols(child, source, symbols);
         }
     }
+
+    /// Get all import statements from the source.
+    pub fn get_imports(&mut self, source: &str) -> Vec<ImportInfo> {
+        let tree = match self.parse(source) {
+            Some(tree) => tree,
+            None => return vec![],
+        };
+
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+        let mut imports = Vec::new();
+
+        self.collect_imports(root, source_bytes, &mut imports);
+        imports
+    }
+
+    /// Recursively collect import statements from the AST.
+    fn collect_imports(&self, node: Node, source: &[u8], imports: &mut Vec<ImportInfo>) {
+        if node.kind() == "idecl" {
+            if let Some(import_info) = self.extract_import(node, source) {
+                imports.push(import_info);
+            }
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_imports(child, source, imports);
+        }
+    }
+
+    /// Extract import information from an idecl node.
+    fn extract_import(&self, node: Node, source: &[u8]) -> Option<ImportInfo> {
+        // Get the import_name node (field "id" in idecl)
+        let import_name_node = node.child_by_field_name("id")?;
+
+        // Find if it's a file or id import
+        let mut cursor = import_name_node.walk();
+        let mut path = None;
+        let mut is_file = false;
+
+        for child in import_name_node.children(&mut cursor) {
+            match child.kind() {
+                "file" => {
+                    // File import - remove quotes
+                    let text = self.node_text(child, source);
+                    path = Some(text.trim_matches('"').to_string());
+                    is_file = true;
+                }
+                "id" => {
+                    // Identifier import (e.g., CompactStandardLibrary)
+                    path = Some(self.node_text(child, source));
+                    is_file = false;
+                }
+                _ => {}
+            }
+        }
+
+        let path = path?;
+
+        // Get the prefix if present
+        let prefix = node
+            .child_by_field_name("prefix")
+            .and_then(|prefix_node| prefix_node.child_by_field_name("id"))
+            .map(|id_node| self.node_text(id_node, source));
+
+        Some(ImportInfo {
+            path,
+            is_file,
+            prefix,
+        })
+    }
 }
 
 impl Default for ParserEngine {
@@ -1281,5 +1365,75 @@ enum Color {
         assert!(symbols.iter().any(|s| s.name == "add" && s.kind == CompletionSymbolKind::Function));
         assert!(symbols.iter().any(|s| s.name == "Point" && s.kind == CompletionSymbolKind::Struct));
         assert!(symbols.iter().any(|s| s.name == "Color" && s.kind == CompletionSymbolKind::Enum));
+    }
+
+    #[test]
+    fn test_get_imports() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+import CompactStandardLibrary;
+import "../utils/Utils" prefix Utils_;
+import "../security/Initializable" prefix Init_;
+import "no_prefix_file";
+
+circuit main(): Field {
+    return 1;
+}
+"#;
+        let imports = parser.get_imports(source);
+
+        // Should find all 4 imports
+        assert_eq!(imports.len(), 4, "Should find 4 imports");
+
+        // Standard library import (no prefix, not a file)
+        let stdlib = imports.iter().find(|i| i.path == "CompactStandardLibrary");
+        assert!(stdlib.is_some(), "Should find CompactStandardLibrary import");
+        let stdlib = stdlib.unwrap();
+        assert!(!stdlib.is_file, "Should not be a file import");
+        assert!(stdlib.prefix.is_none(), "Should have no prefix");
+
+        // Utils import with prefix
+        let utils = imports.iter().find(|i| i.path == "../utils/Utils");
+        assert!(utils.is_some(), "Should find Utils import");
+        let utils = utils.unwrap();
+        assert!(utils.is_file, "Should be a file import");
+        assert_eq!(utils.prefix.as_deref(), Some("Utils_"), "Should have Utils_ prefix");
+
+        // Initializable import with prefix
+        let init = imports.iter().find(|i| i.path == "../security/Initializable");
+        assert!(init.is_some(), "Should find Initializable import");
+        let init = init.unwrap();
+        assert!(init.is_file, "Should be a file import");
+        assert_eq!(init.prefix.as_deref(), Some("Init_"), "Should have Init_ prefix");
+
+        // No prefix file import
+        let no_prefix = imports.iter().find(|i| i.path == "no_prefix_file");
+        assert!(no_prefix.is_some(), "Should find no_prefix_file import");
+        let no_prefix = no_prefix.unwrap();
+        assert!(no_prefix.is_file, "Should be a file import");
+        assert!(no_prefix.prefix.is_none(), "Should have no prefix");
+    }
+
+    #[test]
+    fn test_module_scoped_completion() {
+        let mut parser = ParserEngine::new();
+        // This is exactly what Utils.compact contains
+        let source = r#"
+pragma language_version >= 0.16;
+
+module Utils {
+  export circuit add(a: Field, b: Field): Field {
+    return a + b;
+  }
+}
+"#;
+        let symbols = parser.get_completion_symbols(source);
+
+        // Should find "add" circuit inside the module
+        let add_symbol = symbols.iter().find(|s| s.name == "add");
+        assert!(add_symbol.is_some(), "Should find 'add' circuit inside module. Found: {:?}", symbols);
+
+        let add_symbol = add_symbol.unwrap();
+        assert_eq!(add_symbol.kind, CompletionSymbolKind::Function, "Should be a Function");
     }
 }

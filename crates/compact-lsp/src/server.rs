@@ -20,7 +20,7 @@ use lsp_types::*;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::{Client, LanguageServer};
 
-use compact_analyzer::{DiagnosticEngine, FormatterEngine, ParserEngine};
+use compact_analyzer::{CompletionSymbol, DiagnosticEngine, FormatterEngine, ParserEngine};
 use std::sync::Mutex;
 
 /// A document we're tracking (an open file in the editor).
@@ -63,6 +63,13 @@ pub struct CompactLanguageServer {
     /// The parser engine for tree-sitter based features.
     /// Wrapped in Mutex because tree-sitter Parser is not Send.
     parser_engine: Arc<Mutex<ParserEngine>>,
+
+    /// Workspace root URI (captured from initialize params).
+    workspace_root: Arc<Mutex<Option<String>>>,
+
+    /// Symbol cache for cross-file completion.
+    /// Maps file URI -> symbols defined in that file.
+    symbol_cache: Arc<DashMap<String, Vec<CompletionSymbol>>>,
 }
 
 impl CompactLanguageServer {
@@ -92,6 +99,8 @@ impl CompactLanguageServer {
             diagnostic_engine: Arc::new(diagnostic_engine),
             formatter_engine: Arc::new(formatter_engine),
             parser_engine: Arc::new(Mutex::new(parser_engine)),
+            workspace_root: Arc::new(Mutex::new(None)),
+            symbol_cache: Arc::new(DashMap::new()),
         }
     }
 
@@ -117,6 +126,169 @@ impl CompactLanguageServer {
             .publish_diagnostics(uri, diagnostics, None)
             .await;
     }
+
+    /// Scan workspace for all .compact files and cache their symbols.
+    ///
+    /// This is called during initialization to populate the symbol cache
+    /// for cross-file completion support.
+    async fn scan_workspace(&self) {
+        let root = {
+            let guard = self.workspace_root.lock().unwrap();
+            match guard.as_ref() {
+                Some(uri) => uri.clone(),
+                None => {
+                    tracing::warn!("No workspace root set, skipping workspace scan");
+                    return;
+                }
+            }
+        };
+
+        // Convert file:// URI to path
+        let root_path = match root.strip_prefix("file://") {
+            Some(path) => path,
+            None => {
+                tracing::warn!("Workspace root is not a file URI: {}", root);
+                return;
+            }
+        };
+
+        tracing::info!("Scanning workspace for .compact files: {}", root_path);
+
+        // Walk directory recursively to find .compact files
+        let mut files_found = 0;
+        let mut symbols_found = 0;
+
+        if let Ok(entries) = Self::find_compact_files(root_path) {
+            for file_path in entries {
+                // Read file content
+                let content = match std::fs::read_to_string(&file_path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        tracing::warn!("Failed to read {}: {}", file_path, e);
+                        continue;
+                    }
+                };
+
+                // Parse and extract symbols
+                let symbols = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.get_completion_symbols(&content)
+                };
+
+                let symbol_count = symbols.len();
+                if symbol_count > 0 {
+                    // Store in cache with file:// URI using canonical path
+                    let canonical_path = std::path::Path::new(&file_path)
+                        .canonicalize()
+                        .ok()
+                        .and_then(|p| p.to_str().map(|s| s.to_string()))
+                        .unwrap_or(file_path.clone());
+                    let uri = format!("file://{}", canonical_path);
+                    tracing::debug!("Caching symbols for: {}", uri);
+                    self.symbol_cache.insert(uri, symbols);
+                    symbols_found += symbol_count;
+                }
+
+                files_found += 1;
+            }
+        }
+
+        tracing::info!(
+            "Workspace scan complete: {} files, {} symbols cached",
+            files_found,
+            symbols_found
+        );
+    }
+
+    /// Recursively find all .compact files in a directory.
+    fn find_compact_files(root: &str) -> std::io::Result<Vec<String>> {
+        let mut files = Vec::new();
+        Self::find_compact_files_recursive(root, &mut files)?;
+        Ok(files)
+    }
+
+    fn find_compact_files_recursive(dir: &str, files: &mut Vec<String>) -> std::io::Result<()> {
+        let entries = std::fs::read_dir(dir)?;
+
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                // Skip hidden directories and common non-source directories
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !name.starts_with('.') && name != "node_modules" && name != "target" {
+                    Self::find_compact_files_recursive(path.to_str().unwrap_or(""), files)?;
+                }
+            } else if path.extension().map(|e| e == "compact").unwrap_or(false) {
+                if let Some(path_str) = path.to_str() {
+                    files.push(path_str.to_string());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Update the symbol cache for a specific file.
+    fn update_symbol_cache(&self, uri: &str, content: &str) {
+        let symbols = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_completion_symbols(content)
+        };
+
+        if symbols.is_empty() {
+            self.symbol_cache.remove(uri);
+        } else {
+            self.symbol_cache.insert(uri.to_string(), symbols);
+        }
+    }
+
+    /// Resolve an import path relative to the current file.
+    ///
+    /// Converts relative import paths like "../utils/Utils" to absolute file URIs.
+    fn resolve_import_path(&self, current_uri: &str, import_path: &str) -> Option<String> {
+        // Get the directory of the current file
+        let current_path = current_uri.strip_prefix("file://")?;
+        let current_dir = std::path::Path::new(current_path).parent()?;
+
+        // Resolve the relative import path
+        let import_with_ext = if import_path.ends_with(".compact") {
+            import_path.to_string()
+        } else {
+            format!("{}.compact", import_path)
+        };
+
+        let resolved = current_dir.join(&import_with_ext);
+        let normalized = self.normalize_path(&resolved)?;
+
+        // Return as file:// URI
+        Some(format!("file://{}", normalized))
+    }
+
+    /// Normalize a path by resolving .. and . components.
+    fn normalize_path(&self, path: &std::path::Path) -> Option<String> {
+        // Use canonicalize if the file exists, otherwise do manual normalization
+        if path.exists() {
+            path.canonicalize().ok()?.to_str().map(|s| s.to_string())
+        } else {
+            // Manual normalization for non-existent paths
+            let mut components = Vec::new();
+            for component in path.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        components.pop();
+                    }
+                    std::path::Component::CurDir => {}
+                    _ => {
+                        components.push(component);
+                    }
+                }
+            }
+            let normalized: std::path::PathBuf = components.iter().collect();
+            normalized.to_str().map(|s| s.to_string())
+        }
+    }
 }
 
 /// Implementation of the Language Server Protocol.
@@ -133,8 +305,28 @@ impl LanguageServer for CompactLanguageServer {
     /// - Server info (name, version)
     ///
     /// The editor uses this to know what features to enable.
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         tracing::info!("Received initialize request");
+
+        // Capture workspace root for cross-file features
+        // Prefer workspace_folders (LSP 3.6+), fallback to root_uri
+        let workspace_root = params
+            .workspace_folders
+            .as_ref()
+            .and_then(|folders| folders.first())
+            .map(|f| f.uri.to_string())
+            .or_else(|| {
+                #[allow(deprecated)]
+                params.root_uri.as_ref().map(|u| u.to_string())
+            });
+
+        if let Some(root_str) = workspace_root {
+            tracing::info!("Workspace root: {}", root_str);
+            let mut guard = self.workspace_root.lock().unwrap();
+            *guard = Some(root_str);
+        } else {
+            tracing::warn!("No workspace root provided by client");
+        }
 
         Ok(InitializeResult {
             // Tell the editor what we can do
@@ -198,6 +390,9 @@ impl LanguageServer for CompactLanguageServer {
     /// The handshake is now complete and normal operation can begin.
     async fn initialized(&self, _params: InitializedParams) {
         tracing::info!("Server initialized - handshake complete");
+
+        // Scan workspace for .compact files and cache symbols
+        self.scan_workspace().await;
 
         // We can send a message to the editor's log
         self.client
@@ -282,7 +477,15 @@ impl LanguageServer for CompactLanguageServer {
     /// and publish any diagnostics (errors/warnings).
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.clone();
+        let uri_str = uri.to_string();
         tracing::debug!("Document saved: {:?}", uri);
+
+        // Update symbol cache for this file
+        if let Some(doc) = self.documents.get(&uri_str) {
+            let content = doc.content.to_string();
+            self.update_symbol_cache(&uri_str, &content);
+            tracing::debug!("Symbol cache updated for: {}", uri_str);
+        }
 
         // Run diagnostics
         self.publish_diagnostics(uri).await;
@@ -320,31 +523,119 @@ impl LanguageServer for CompactLanguageServer {
         let mut items = Vec::new();
         let uri = params.text_document_position.text_document.uri.to_string();
 
-        // Get symbols from the current document
-        if let Some(doc) = self.documents.get(&uri) {
+        // Helper to convert symbol kind to LSP kind
+        fn symbol_to_lsp_kind(kind: compact_analyzer::CompletionSymbolKind) -> CompletionItemKind {
+            use compact_analyzer::CompletionSymbolKind;
+            match kind {
+                CompletionSymbolKind::Function => CompletionItemKind::FUNCTION,
+                CompletionSymbolKind::Struct => CompletionItemKind::STRUCT,
+                CompletionSymbolKind::Enum => CompletionItemKind::ENUM,
+                CompletionSymbolKind::Variable => CompletionItemKind::VARIABLE,
+                CompletionSymbolKind::Module => CompletionItemKind::MODULE,
+            }
+        }
+
+        // Get symbols from the current document (highest priority - parsed fresh)
+        // Also parse imports to know what's available with prefixes
+        let imports = if let Some(doc) = self.documents.get(&uri) {
             let content = doc.content.to_string();
+
+            // Get local symbols (no prefix)
             let symbols = {
                 let mut parser = self.parser_engine.lock().unwrap();
                 parser.get_completion_symbols(&content)
             };
 
             for sym in symbols {
-                use compact_analyzer::CompletionSymbolKind;
-                let kind = match sym.kind {
-                    CompletionSymbolKind::Function => CompletionItemKind::FUNCTION,
-                    CompletionSymbolKind::Struct => CompletionItemKind::STRUCT,
-                    CompletionSymbolKind::Enum => CompletionItemKind::ENUM,
-                    CompletionSymbolKind::Variable => CompletionItemKind::VARIABLE,
-                    CompletionSymbolKind::Module => CompletionItemKind::MODULE,
-                };
-
                 items.push(CompletionItem {
                     label: sym.name.clone(),
-                    kind: Some(kind),
+                    kind: Some(symbol_to_lsp_kind(sym.kind)),
                     detail: sym.detail,
                     insert_text: Some(sym.name),
                     ..Default::default()
                 });
+            }
+
+            // Parse imports for cross-file completion
+            let imports = {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.get_imports(&content)
+            };
+            imports
+        } else {
+            vec![]
+        };
+
+        // Debug: log imports found
+        tracing::debug!("Found {} imports in current file", imports.len());
+        for import in &imports {
+            tracing::debug!(
+                "  Import: path={:?}, is_file={}, prefix={:?}",
+                import.path,
+                import.is_file,
+                import.prefix
+            );
+        }
+
+        // Debug: log cache keys
+        tracing::debug!("Symbol cache has {} entries:", self.symbol_cache.len());
+        for entry in self.symbol_cache.iter() {
+            tracing::debug!("  Cache key: {}", entry.key());
+        }
+
+        // Get symbols from imported files (with proper prefix)
+        for import in &imports {
+            // Skip non-file imports (e.g., CompactStandardLibrary)
+            if !import.is_file {
+                tracing::debug!("Skipping non-file import: {}", import.path);
+                continue;
+            }
+
+            // Resolve the import path to a file URI
+            let resolved_uri = match self.resolve_import_path(&uri, &import.path) {
+                Some(uri) => uri,
+                None => {
+                    tracing::warn!("Could not resolve import: {} (from {})", import.path, uri);
+                    continue;
+                }
+            };
+
+            tracing::debug!("Resolved import {} -> {}", import.path, resolved_uri);
+
+            // Get symbols from the imported file's cache
+            if let Some(entry) = self.symbol_cache.get(&resolved_uri) {
+                tracing::debug!("Found {} symbols in cache for {}", entry.value().len(), resolved_uri);
+                let prefix = import.prefix.as_deref().unwrap_or("");
+
+                for sym in entry.value().iter() {
+                    // Apply prefix to symbol name
+                    let prefixed_name = if prefix.is_empty() {
+                        sym.name.clone()
+                    } else {
+                        format!("{}{}", prefix, sym.name)
+                    };
+
+                    // Extract source filename for detail
+                    let source_file = import
+                        .path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&import.path);
+
+                    items.push(CompletionItem {
+                        label: prefixed_name.clone(),
+                        kind: Some(symbol_to_lsp_kind(sym.kind)),
+                        detail: Some(format!(
+                            "{} (from {})",
+                            sym.detail.as_deref().unwrap_or(""),
+                            source_file
+                        )),
+                        insert_text: Some(prefixed_name),
+                        ..Default::default()
+                    });
+                }
+            } else {
+                tracing::warn!("Cache miss for resolved URI: {}", resolved_uri);
             }
         }
 
