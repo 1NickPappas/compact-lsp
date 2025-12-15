@@ -784,6 +784,135 @@ impl CompactLanguageServer {
 
         names
     }
+
+    /// Check if a name is a Compact keyword.
+    fn is_keyword(name: &str) -> bool {
+        matches!(
+            name,
+            "circuit"
+                | "witness"
+                | "struct"
+                | "enum"
+                | "module"
+                | "import"
+                | "export"
+                | "ledger"
+                | "return"
+                | "if"
+                | "else"
+                | "for"
+                | "while"
+                | "let"
+                | "const"
+                | "true"
+                | "false"
+                | "public"
+                | "private"
+                | "pure"
+                | "sealed"
+                | "pragma"
+                | "include"
+                | "constructor"
+                | "contract"
+                | "assert"
+                | "default"
+                | "map"
+                | "fold"
+                | "disclose"
+                | "pad"
+                | "as"
+                | "of"
+                | "prefix"
+        )
+    }
+
+    /// Check if a name is a built-in type.
+    fn is_builtin_type(name: &str) -> bool {
+        matches!(
+            name,
+            "Field"
+                | "Boolean"
+                | "Uint"
+                | "Bytes"
+                | "Vector"
+                | "Opaque"
+                | "Counter"
+                | "Void"
+                | "Map"
+                | "Set"
+                | "Cell"
+                | "Address"
+        )
+    }
+
+    /// Check if a name is a valid Compact identifier.
+    fn is_valid_identifier(name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+        let mut chars = name.chars();
+        // First char must be letter or underscore
+        match chars.next() {
+            Some(c) if c.is_alphabetic() || c == '_' => {}
+            _ => return false,
+        }
+        // Rest must be alphanumeric or underscore
+        chars.all(|c| c.is_alphanumeric() || c == '_')
+    }
+
+    /// Get the range of the word at a given position.
+    fn get_word_range_at_position(
+        &self,
+        content: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<Range> {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_content = lines.get(line as usize)?;
+
+        let char_idx = character as usize;
+        if char_idx > line_content.len() {
+            return None;
+        }
+
+        let chars: Vec<char> = line_content.chars().collect();
+
+        // Find word boundaries
+        let mut start = char_idx;
+        while start > 0 {
+            let c = chars.get(start - 1)?;
+            if c.is_alphanumeric() || *c == '_' {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut end = char_idx;
+        while end < chars.len() {
+            let c = chars.get(end)?;
+            if c.is_alphanumeric() || *c == '_' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+
+        if start == end {
+            return None;
+        }
+
+        Some(Range {
+            start: Position {
+                line,
+                character: start as u32,
+            },
+            end: Position {
+                line,
+                character: end as u32,
+            },
+        })
+    }
 }
 
 /// Implementation of the Language Server Protocol.
@@ -865,6 +994,11 @@ impl LanguageServer for CompactLanguageServer {
                 definition_provider: Some(OneOf::Left(true)),
                 // Find references provider
                 references_provider: Some(OneOf::Left(true)),
+                // Rename provider
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 // Signature help provider
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
@@ -1936,5 +2070,177 @@ impl LanguageServer for CompactLanguageServer {
         } else {
             Ok(Some(all_locations))
         }
+    }
+
+    /// Handle `textDocument/prepareRename` request.
+    ///
+    /// Validates that rename is possible at the given position and returns
+    /// the range of the symbol to be renamed.
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri.to_string();
+        let position = params.position;
+
+        tracing::debug!("Prepare rename at {}:{}:{}", uri, position.line, position.character);
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        // Get the word at cursor position
+        let symbol_name = match self.get_word_at_position(&content, position.line, position.character) {
+            Some(name) => name,
+            None => return Ok(None),
+        };
+
+        // Check if this is a renameable symbol (not a keyword or built-in type)
+        if Self::is_keyword(&symbol_name) {
+            tracing::debug!("Cannot rename keyword: {}", symbol_name);
+            return Ok(None);
+        }
+
+        if Self::is_builtin_type(&symbol_name) {
+            tracing::debug!("Cannot rename built-in type: {}", symbol_name);
+            return Ok(None);
+        }
+
+        // Get the range of the symbol
+        let range = match self.get_word_range_at_position(&content, position.line, position.character) {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        tracing::debug!("Prepare rename successful for '{}' at {:?}", symbol_name, range);
+        Ok(Some(PrepareRenameResponse::Range(range)))
+    }
+
+    /// Handle `textDocument/rename` request.
+    ///
+    /// Performs the rename operation across all files in the workspace.
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri.clone();
+        let uri_string = uri.to_string();
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        tracing::info!(
+            "Rename at {}:{}:{} to '{}'",
+            uri_string,
+            position.line,
+            position.character,
+            new_name
+        );
+
+        let content = match self.documents.get(&uri_string) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        // Get the old symbol name
+        let old_name = match self.get_word_at_position(&content, position.line, position.character) {
+            Some(name) => name,
+            None => return Ok(None),
+        };
+
+        // Validate new name is a valid identifier
+        if !Self::is_valid_identifier(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Invalid identifier: must start with letter or underscore",
+            ));
+        }
+
+        // Check new name isn't a keyword
+        if Self::is_keyword(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Cannot rename to a keyword",
+            ));
+        }
+
+        // Check new name isn't a built-in type
+        if Self::is_builtin_type(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Cannot rename to a built-in type name",
+            ));
+        }
+
+        tracing::debug!("Renaming '{}' to '{}'", old_name, new_name);
+
+        // Collect all edits grouped by file
+        let mut changes: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
+            std::collections::HashMap::new();
+
+        // 1. Find and replace in current file
+        let local_refs = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.find_references(&content, &old_name)
+        };
+
+        for r in local_refs {
+            changes.entry(uri.clone()).or_default().push(TextEdit {
+                range: r.range,
+                new_text: new_name.clone(),
+            });
+        }
+
+        // 2. Find and replace in other workspace files
+        for entry in self.source_cache.iter() {
+            let file_uri = entry.key();
+            if file_uri == &uri_string {
+                continue;
+            }
+
+            let file_content = entry.value();
+            let search_names = self.get_search_names_for_file(file_uri, &uri_string, &old_name);
+
+            for search_name in search_names {
+                let refs = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.find_references(file_content, &search_name)
+                };
+
+                // Calculate the new name for this file (with prefix if needed)
+                let new_name_for_file = if search_name != old_name {
+                    // Has prefix - need to apply same prefix to new name
+                    let prefix = &search_name[..search_name.len() - old_name.len()];
+                    format!("{}{}", prefix, new_name)
+                } else {
+                    new_name.clone()
+                };
+
+                for r in refs {
+                    // In other files, we only rename usages, not definitions
+                    if r.is_definition {
+                        continue;
+                    }
+                    if let Ok(loc_uri) = file_uri.parse::<lsp_types::Uri>() {
+                        changes.entry(loc_uri).or_default().push(TextEdit {
+                            range: r.range,
+                            new_text: new_name_for_file.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if changes.is_empty() {
+            tracing::debug!("No changes to make");
+            return Ok(None);
+        }
+
+        let total_edits: usize = changes.values().map(|v| v.len()).sum();
+        tracing::info!(
+            "Rename complete: {} edits across {} files",
+            total_edits,
+            changes.len()
+        );
+
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        }))
     }
 }

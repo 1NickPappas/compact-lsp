@@ -12,6 +12,7 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 | **Hover** | Documentation for keywords, types, and symbols |
 | **Go to Definition** | Jump to symbol definitions (local and imported) |
 | **Find References** | Find all usages of a symbol (local and cross-file) |
+| **Rename** | Rename symbols across the workspace |
 | **Signature Help** | Parameter hints while typing function calls |
 | **Document Symbols** | Outline view (circuits, structs, enums, modules) |
 | **Formatting** | Code formatting via `format-compact` |
@@ -25,14 +26,13 @@ Works with Compact's import system:
 ```compact
 import "./Utils" prefix Utils_;
 
-Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, signature help all work
+Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, rename, signature help all work
 ```
 
 ### Roadmap
 
 | Feature | Status |
 |---------|--------|
-| Rename | Planned |
 | Code Actions | Planned |
 
 ## Requirements
