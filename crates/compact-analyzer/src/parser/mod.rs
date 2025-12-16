@@ -241,6 +241,63 @@ impl ParserEngine {
         node.utf8_text(source).unwrap_or("").to_string()
     }
 
+    /// Extract documentation comments preceding a node.
+    /// Collects contiguous comment lines directly above a declaration.
+    fn extract_doc_comment(&self, node: Node, source: &[u8]) -> Option<String> {
+        let mut comments = Vec::new();
+        let mut current = node.prev_sibling();
+
+        // Walk backwards collecting contiguous comments
+        while let Some(sibling) = current {
+            if sibling.kind() == "comment" {
+                let text = self.node_text(sibling, source);
+                let cleaned = self.clean_comment_text(&text);
+                if !cleaned.is_empty() {
+                    comments.push(cleaned);
+                }
+                current = sibling.prev_sibling();
+            } else {
+                // Hit non-comment, stop
+                break;
+            }
+        }
+
+        if comments.is_empty() {
+            None
+        } else {
+            comments.reverse();
+            Some(comments.join("\n"))
+        }
+    }
+
+    /// Clean comment text by removing markers and normalizing.
+    fn clean_comment_text(&self, text: &str) -> String {
+        let text = text.trim();
+
+        // Handle single-line comments: // ...
+        if text.starts_with("//") {
+            return text[2..].trim().to_string();
+        }
+
+        // Handle block comments: /* ... */ or /** ... */
+        if text.starts_with("/*") && text.ends_with("*/") {
+            let inner = &text[2..text.len() - 2];
+            // Remove leading * from JSDoc-style (/** */)
+            let inner = inner.trim_start_matches('*');
+
+            // Process multi-line: remove leading * from each line
+            let lines: Vec<&str> = inner
+                .lines()
+                .map(|line| line.trim().trim_start_matches('*').trim())
+                .filter(|line| !line.is_empty())
+                .collect();
+
+            return lines.join("\n");
+        }
+
+        text.to_string()
+    }
+
     /// Convert tree-sitter node position to LSP Range.
     fn node_range(&self, node: Node) -> Range {
         let start = node.start_position();
@@ -437,25 +494,40 @@ impl ParserEngine {
     fn definition_hover(&self, node: Node, source: &[u8]) -> Option<HoverInfo> {
         let kind = node.kind();
 
+        // Extract any doc comments preceding the definition
+        let doc_comment = self.extract_doc_comment(node, source);
+        let doc_suffix = doc_comment
+            .map(|doc| format!("\n\n---\n\n{}", doc))
+            .unwrap_or_default();
+
         match kind {
             "cdefn" => {
                 let signature = self.extract_circuit_signature(node, source)?;
                 Some(HoverInfo {
-                    content: format!("```compact\n{}\n```\n\nCircuit function", signature),
+                    content: format!(
+                        "```compact\n{}\n```\n\nCircuit function{}",
+                        signature, doc_suffix
+                    ),
                     range: Some(self.node_range(node)),
                 })
             }
             "edecl" => {
                 let signature = self.extract_circuit_signature(node, source)?;
                 Some(HoverInfo {
-                    content: format!("```compact\n{}\n```\n\nExternal circuit declaration", signature),
+                    content: format!(
+                        "```compact\n{}\n```\n\nExternal circuit declaration{}",
+                        signature, doc_suffix
+                    ),
                     range: Some(self.node_range(node)),
                 })
             }
             "wdecl" => {
                 let signature = self.extract_witness_signature(node, source)?;
                 Some(HoverInfo {
-                    content: format!("```compact\n{}\n```\n\nWitness function", signature),
+                    content: format!(
+                        "```compact\n{}\n```\n\nWitness function{}",
+                        signature, doc_suffix
+                    ),
                     range: Some(self.node_range(node)),
                 })
             }
@@ -463,7 +535,10 @@ impl ParserEngine {
                 let name = self.get_field_text(node, "name", source)?;
                 let type_text = self.get_field_text(node, "type", source).unwrap_or_default();
                 Some(HoverInfo {
-                    content: format!("```compact\nledger {}: {}\n```\n\nLedger state", name, type_text),
+                    content: format!(
+                        "```compact\nledger {}: {}\n```\n\nLedger state{}",
+                        name, type_text, doc_suffix
+                    ),
                     range: Some(self.node_range(node)),
                 })
             }
@@ -476,7 +551,10 @@ impl ParserEngine {
                     format!("\n\nFields:\n{}", fields.join("\n"))
                 };
                 Some(HoverInfo {
-                    content: format!("```compact\nstruct {}\n```\n\nStruct type{}", name, fields_str),
+                    content: format!(
+                        "```compact\nstruct {}\n```\n\nStruct type{}{}",
+                        name, fields_str, doc_suffix
+                    ),
                     range: Some(self.node_range(node)),
                 })
             }
@@ -489,7 +567,10 @@ impl ParserEngine {
                     format!("\n\nVariants: {}", variants.join(", "))
                 };
                 Some(HoverInfo {
-                    content: format!("```compact\nenum {}\n```\n\nEnum type{}", name, variants_str),
+                    content: format!(
+                        "```compact\nenum {}\n```\n\nEnum type{}{}",
+                        name, variants_str, doc_suffix
+                    ),
                     range: Some(self.node_range(node)),
                 })
             }
@@ -958,8 +1039,23 @@ impl ParserEngine {
     }
 
     /// Recursively collect completion symbols from the AST.
-    fn collect_completion_symbols(&self, node: Node, source: &[u8], symbols: &mut Vec<CompletionSymbol>) {
+    fn collect_completion_symbols(
+        &self,
+        node: Node,
+        source: &[u8],
+        symbols: &mut Vec<CompletionSymbol>,
+    ) {
         let kind = node.kind();
+
+        // Extract any doc comments preceding the definition (for relevant node types)
+        let doc_comment = match kind {
+            "cdefn" | "edecl" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" => {
+                self.extract_doc_comment(node, source)
+                    .map(|doc| format!("\n\n---\n\n{}", doc))
+                    .unwrap_or_default()
+            }
+            _ => String::new(),
+        };
 
         match kind {
             // Circuit definitions
@@ -969,7 +1065,10 @@ impl ParserEngine {
                     let return_type = self.get_type_text(node, source).unwrap_or_default();
                     let detail = format!("({}): {}", params, return_type);
                     let location = self.node_to_symbol_location(node);
-                    let doc = format!("Circuit function\n\n```compact\ncircuit {}{}\n```", name, detail);
+                    let doc = format!(
+                        "Circuit function\n\n```compact\ncircuit {}{}\n```{}",
+                        name, detail, doc_comment
+                    );
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Function,
@@ -986,7 +1085,10 @@ impl ParserEngine {
                     let return_type = self.get_type_text(node, source).unwrap_or_default();
                     let detail = format!("({}): {}", params, return_type);
                     let location = self.node_to_symbol_location(node);
-                    let doc = format!("External circuit\n\n```compact\ncircuit {}{}\n```", name, detail);
+                    let doc = format!(
+                        "External circuit\n\n```compact\ncircuit {}{}\n```{}",
+                        name, detail, doc_comment
+                    );
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Function,
@@ -1003,7 +1105,10 @@ impl ParserEngine {
                     let return_type = self.get_type_text(node, source).unwrap_or_default();
                     let detail = format!("({}): {}", params, return_type);
                     let location = self.node_to_symbol_location(node);
-                    let doc = format!("Witness function\n\n```compact\nwitness {}{}\n```", name, detail);
+                    let doc = format!(
+                        "Witness function\n\n```compact\nwitness {}{}\n```{}",
+                        name, detail, doc_comment
+                    );
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Function,
@@ -1019,9 +1124,14 @@ impl ParserEngine {
                     let location = self.node_to_symbol_location(node);
                     let fields = self.extract_struct_fields(node, source);
                     let doc = if fields.is_empty() {
-                        format!("Struct type\n\n```compact\nstruct {}\n```", name)
+                        format!("Struct type\n\n```compact\nstruct {}\n```{}", name, doc_comment)
                     } else {
-                        format!("Struct type\n\n```compact\nstruct {}\n```\n\nFields:\n{}", name, fields.join("\n"))
+                        format!(
+                            "Struct type\n\n```compact\nstruct {}\n```\n\nFields:\n{}{}",
+                            name,
+                            fields.join("\n"),
+                            doc_comment
+                        )
                     };
                     symbols.push(CompletionSymbol {
                         name,
@@ -1038,9 +1148,14 @@ impl ParserEngine {
                     let location = self.node_to_symbol_location(node);
                     let variants = self.extract_enum_variants(node, source);
                     let doc = if variants.is_empty() {
-                        format!("Enum type\n\n```compact\nenum {}\n```", name)
+                        format!("Enum type\n\n```compact\nenum {}\n```{}", name, doc_comment)
                     } else {
-                        format!("Enum type\n\n```compact\nenum {}\n```\n\nVariants: {}", name, variants.join(", "))
+                        format!(
+                            "Enum type\n\n```compact\nenum {}\n```\n\nVariants: {}{}",
+                            name,
+                            variants.join(", "),
+                            doc_comment
+                        )
                     };
                     symbols.push(CompletionSymbol {
                         name,
@@ -1058,9 +1173,10 @@ impl ParserEngine {
                     let location = self.node_to_symbol_location(node);
                     let detail = type_text.as_ref().map(|t| format!("ledger: {}", t));
                     let doc = format!(
-                        "Ledger state\n\n```compact\nledger {}: {}\n```",
+                        "Ledger state\n\n```compact\nledger {}: {}\n```{}",
                         name,
-                        type_text.as_deref().unwrap_or("unknown")
+                        type_text.as_deref().unwrap_or("unknown"),
+                        doc_comment
                     );
                     symbols.push(CompletionSymbol {
                         name,
@@ -1075,7 +1191,10 @@ impl ParserEngine {
             "mdefn" => {
                 if let Some(name) = self.get_field_text(node, "name", source) {
                     let location = self.node_to_symbol_location(node);
-                    let doc = format!("Module namespace\n\n```compact\nmodule {}\n```", name);
+                    let doc = format!(
+                        "Module namespace\n\n```compact\nmodule {}\n```{}",
+                        name, doc_comment
+                    );
                     symbols.push(CompletionSymbol {
                         name,
                         kind: CompletionSymbolKind::Module,
@@ -2330,5 +2449,136 @@ circuit main(): Field {
         let helpers_import = imports.iter().find(|i| i.path.contains("Helpers"));
         assert!(helpers_import.is_some(), "Should find Helpers import");
         assert_eq!(helpers_import.unwrap().prefix.as_deref(), Some("Help_"), "Should have Help_ prefix");
+    }
+
+    // ========== Doc comment tests ==========
+
+    #[test]
+    fn test_clean_comment_text_single_line() {
+        let parser = ParserEngine::new();
+        assert_eq!(parser.clean_comment_text("// hello world"), "hello world");
+        assert_eq!(parser.clean_comment_text("//hello"), "hello");
+        assert_eq!(parser.clean_comment_text("//   spaced   "), "spaced");
+    }
+
+    #[test]
+    fn test_clean_comment_text_block() {
+        let parser = ParserEngine::new();
+        assert_eq!(parser.clean_comment_text("/* simple */"), "simple");
+        assert_eq!(parser.clean_comment_text("/*multi\nline*/"), "multi\nline");
+    }
+
+    #[test]
+    fn test_clean_comment_text_jsdoc() {
+        let parser = ParserEngine::new();
+        // JSDoc-style with leading asterisks on each line
+        let jsdoc = r#"/**
+ * This is a JSDoc comment.
+ * It has multiple lines.
+ */"#;
+        let cleaned = parser.clean_comment_text(jsdoc);
+        assert!(cleaned.contains("This is a JSDoc comment"), "Should contain first line");
+        assert!(cleaned.contains("It has multiple lines"), "Should contain second line");
+    }
+
+    #[test]
+    fn test_hover_with_doc_comment() {
+        let mut parser = ParserEngine::new();
+        let source = r#"// Adds two field elements together.
+// Returns the sum.
+circuit add(a: Field, b: Field): Field {
+    return a + b;
+}"#;
+        // Hover on "add" at position (2, 8)
+        let info = parser.hover_info(source, 2, 8);
+        assert!(info.is_some(), "Should find hover info");
+        let info = info.unwrap();
+        assert!(info.content.contains("Circuit function"), "Should contain type description");
+        assert!(
+            info.content.contains("Adds two field elements together"),
+            "Should contain doc comment: {}",
+            info.content
+        );
+        assert!(
+            info.content.contains("Returns the sum"),
+            "Should contain second line of doc: {}",
+            info.content
+        );
+    }
+
+    #[test]
+    fn test_hover_with_block_doc_comment() {
+        let mut parser = ParserEngine::new();
+        let source = r#"/* A point in 2D space */
+struct Point {
+    x: Field;
+    y: Field;
+}"#;
+        // Hover on "Point" at position (1, 7)
+        let info = parser.hover_info(source, 1, 7);
+        assert!(info.is_some(), "Should find hover info");
+        let info = info.unwrap();
+        assert!(info.content.contains("Struct type"), "Should contain type description");
+        assert!(
+            info.content.contains("A point in 2D space"),
+            "Should contain block doc comment: {}",
+            info.content
+        );
+    }
+
+    #[test]
+    fn test_completion_with_doc_comment() {
+        let mut parser = ParserEngine::new();
+        let source = r#"// Calculates the sum of two numbers.
+circuit add(a: Field, b: Field): Field {
+    return a + b;
+}
+
+/**
+ * Represents a 2D coordinate.
+ * Used for geometric calculations.
+ */
+struct Point {
+    x: Field;
+    y: Field;
+}"#;
+        let symbols = parser.get_completion_symbols(source);
+
+        // Check circuit has doc comment
+        let add_sym = symbols.iter().find(|s| s.name == "add");
+        assert!(add_sym.is_some(), "Should find add circuit");
+        let add_doc = add_sym.unwrap().documentation.as_ref().unwrap();
+        assert!(
+            add_doc.contains("Calculates the sum"),
+            "Circuit docs should contain user comment: {}",
+            add_doc
+        );
+
+        // Check struct has JSDoc comment
+        let point_sym = symbols.iter().find(|s| s.name == "Point");
+        assert!(point_sym.is_some(), "Should find Point struct");
+        let point_doc = point_sym.unwrap().documentation.as_ref().unwrap();
+        assert!(
+            point_doc.contains("Represents a 2D coordinate"),
+            "Struct docs should contain JSDoc comment: {}",
+            point_doc
+        );
+    }
+
+    #[test]
+    fn test_hover_no_doc_comment() {
+        let mut parser = ParserEngine::new();
+        // No doc comment, just the circuit
+        let source = "circuit add(a: Field, b: Field): Field { return a + b; }";
+        let info = parser.hover_info(source, 0, 8);
+        assert!(info.is_some(), "Should find hover info");
+        let info = info.unwrap();
+        assert!(info.content.contains("Circuit function"), "Should contain type description");
+        // Should not have the separator since there's no doc comment
+        assert!(
+            !info.content.contains("---\n\n"),
+            "Should not have doc separator without doc: {}",
+            info.content
+        );
     }
 }
