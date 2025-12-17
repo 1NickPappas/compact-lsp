@@ -1,8 +1,10 @@
 # compact-lsp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/midnightntwrk/compact-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/midnightntwrk/compact-lsp/actions/workflows/ci.yml)
+[![CI](https://github.com/1NickPappas/compact-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/1NickPappas/compact-lsp/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+
+> ⚠️ **Note:** This is an experimental project developed in my personal free time for educational purposes — primarily to learn how Language Server Protocol implementations work. While functional, it is not officially supported. Feedback and contributions are welcome!
 
 Language Server Protocol implementation for the [Compact](https://docs.midnight.network/develop/reference/compact/lang-ref) smart contract language (Midnight network).
 
@@ -33,11 +35,11 @@ import "./Utils" prefix Utils_;
 Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, rename, signature help all work
 ```
 
-### Roadmap
+### Missing Things
 
 | Feature | Status |
 |---------|--------|
-| Code Actions | Planned |
+| Code Actions | TODO |
 
 ## Requirements
 
@@ -62,8 +64,8 @@ The LSP auto-detects `compactc.bin`:
 
 ## Related Projects
 
-- [compact.vim](../compact.vim) - Vim/Neovim syntax highlighting
-- [tree-sitter-compact](../compact-tree-sitter) - Tree-sitter grammar
+- [compact.vim](https://github.com/1NickPappas/compact.vim) - Vim/Neovim syntax highlighting
+- [compact-tree-sitter](https://github.com/midnightntwrk/compact-tree-sitter) - Tree-sitter grammar
 
 ## Neovim Setup
 
