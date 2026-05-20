@@ -477,8 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_uses_0_21_names() {
-        // 0.21 names present.
+    fn test_registry_uses_current_names() {
+        // 0.21+ names present.
         assert!(find_stdlib_struct("ShieldedCoinInfo").is_some());
         assert!(find_stdlib_struct("QualifiedShieldedCoinInfo").is_some());
         assert!(find_stdlib_struct("ShieldedSendResult").is_some());

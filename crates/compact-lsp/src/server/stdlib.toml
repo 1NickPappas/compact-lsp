@@ -4,7 +4,7 @@
 # `import CompactStandardLibrary;`.  It is embedded at compile time
 # (include_str!) and parsed once on first access.
 #
-# Target: Compact language 0.21.x. Transcribed from the compiler's
+# Target: Compact language 0.23.x. Transcribed from the compiler's
 # standard-library.compact (signatures + snake_case field names) and the
 # CompactStandardLibrary API reference for compiler intrinsics.
 #
