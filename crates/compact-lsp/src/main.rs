@@ -39,8 +39,7 @@ async fn main() {
     // Build the LSP service
     // LspService::build takes a closure that receives a Client
     // The Client is used to send notifications TO the editor (e.g., diagnostics)
-    let (service, socket) =
-        LspService::build(|client| server::CompactLanguageServer::new(client)).finish();
+    let (service, socket) = LspService::build(server::CompactLanguageServer::new).finish();
 
     // Start the server - this runs until the editor disconnects
     Server::new(stdin, stdout, socket).serve(service).await;
