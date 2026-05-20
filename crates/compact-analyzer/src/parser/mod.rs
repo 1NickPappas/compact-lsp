@@ -84,7 +84,11 @@ impl ParserEngine {
             // External circuit declaration: circuit name(...): Type;
             "edecl" => {
                 let name = self.get_field_text(node, "id", source)?;
-                (name, SymbolKind::FUNCTION, Some("external circuit".to_string()))
+                (
+                    name,
+                    SymbolKind::FUNCTION,
+                    Some("external circuit".to_string()),
+                )
             }
             // Witness declaration: witness name(...): Type;
             "wdecl" => {
@@ -117,9 +121,7 @@ impl ParserEngine {
                 (name, SymbolKind::CLASS, Some("contract".to_string()))
             }
             // Constructor
-            "lconstructor" => {
-                ("constructor".to_string(), SymbolKind::CONSTRUCTOR, None)
-            }
+            "lconstructor" => ("constructor".to_string(), SymbolKind::CONSTRUCTOR, None),
             _ => return None,
         };
 
@@ -550,7 +552,9 @@ impl ParserEngine {
             }
             "ldecl" => {
                 let name = self.get_field_text(node, "name", source)?;
-                let type_text = self.get_field_text(node, "type", source).unwrap_or_default();
+                let type_text = self
+                    .get_field_text(node, "type", source)
+                    .unwrap_or_default();
                 Some(HoverInfo {
                     content: format!(
                         "```compact\nledger {}: {}\n```\n\nLedger state{}",
@@ -599,7 +603,9 @@ impl ParserEngine {
     fn extract_circuit_signature(&self, node: Node, source: &[u8]) -> Option<String> {
         let name = self.get_field_text(node, "id", source)?;
         let params = self.extract_params(node, source);
-        let return_type = self.get_field_text(node, "type", source).unwrap_or_default();
+        let return_type = self
+            .get_field_text(node, "type", source)
+            .unwrap_or_default();
         Some(format!("circuit {}({}): {}", name, params, return_type))
     }
 
@@ -607,7 +613,9 @@ impl ParserEngine {
     fn extract_witness_signature(&self, node: Node, source: &[u8]) -> Option<String> {
         let name = self.get_field_text(node, "id", source)?;
         let params = self.extract_params(node, source);
-        let return_type = self.get_field_text(node, "type", source).unwrap_or_default();
+        let return_type = self
+            .get_field_text(node, "type", source)
+            .unwrap_or_default();
         Some(format!("witness {}({}): {}", name, params, return_type))
     }
 
@@ -662,14 +670,21 @@ impl ParserEngine {
     }
 
     /// Recursively search for a definition with the given name.
-    fn find_definition_node<'a>(&self, name: &str, node: Node<'a>, source: &[u8]) -> Option<Node<'a>> {
+    fn find_definition_node<'a>(
+        &self,
+        name: &str,
+        node: Node<'a>,
+        source: &[u8],
+    ) -> Option<Node<'a>> {
         let kind = node.kind();
 
         // Check if this node is a definition with matching name
         let def_name = match kind {
             // Circuit definitions use "function_name" node
             "cdefn" | "edecl" | "wdecl" => self.get_function_name(node, source),
-            "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => self.get_field_text(node, "name", source),
+            "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => {
+                self.get_field_text(node, "name", source)
+            }
             _ => None,
         };
 
@@ -691,7 +706,12 @@ impl ParserEngine {
     /// Go to definition for the symbol at the given position.
     ///
     /// Returns the location of the definition if found.
-    pub fn goto_definition(&mut self, source: &str, line: u32, character: u32) -> Option<DefinitionLocation> {
+    pub fn goto_definition(
+        &mut self,
+        source: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<DefinitionLocation> {
         let tree = self.parse(source)?;
         let root = tree.root_node();
         let source_bytes = source.as_bytes();
@@ -748,7 +768,8 @@ impl ParserEngine {
         let def_node = self.find_definition_node(&text, root, source_bytes)?;
 
         // Get the name node for selection range
-        let name_range = self.get_definition_name_range(def_node, source_bytes)
+        let name_range = self
+            .get_definition_name_range(def_node, source_bytes)
             .unwrap_or_else(|| self.node_range(def_node));
 
         Some(DefinitionLocation {
@@ -773,7 +794,12 @@ impl ParserEngine {
     /// Get signature help for a function call at the given position.
     ///
     /// Returns signature information if the cursor is inside a function call.
-    pub fn signature_help(&mut self, source: &str, line: u32, character: u32) -> Option<SignatureInfo> {
+    pub fn signature_help(
+        &mut self,
+        source: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<SignatureInfo> {
         let tree = self.parse(source)?;
         let root = tree.root_node();
         let source_bytes = source.as_bytes();
@@ -801,7 +827,12 @@ impl ParserEngine {
     }
 
     /// Find an enclosing function call expression.
-    fn find_enclosing_call<'a>(&self, node: Node<'a>, source: &[u8], cursor_point: tree_sitter::Point) -> Option<(Node<'a>, String)> {
+    fn find_enclosing_call<'a>(
+        &self,
+        node: Node<'a>,
+        source: &[u8],
+        cursor_point: tree_sitter::Point,
+    ) -> Option<(Node<'a>, String)> {
         let mut current = Some(node);
 
         while let Some(n) = current {
@@ -817,7 +848,9 @@ impl ParserEngine {
             // For blocks, search children for ERROR nodes with function calls
             // This handles incomplete code while typing
             if kind == "block" {
-                if let Some((error_node, name)) = self.find_error_call_in_block(n, source, cursor_point) {
+                if let Some((error_node, name)) =
+                    self.find_error_call_in_block(n, source, cursor_point)
+                {
                     return Some((error_node, name));
                 }
             }
@@ -829,7 +862,12 @@ impl ParserEngine {
     }
 
     /// Search a block for ERROR nodes containing function calls before cursor.
-    fn find_error_call_in_block<'a>(&self, block: Node<'a>, source: &[u8], cursor_point: tree_sitter::Point) -> Option<(Node<'a>, String)> {
+    fn find_error_call_in_block<'a>(
+        &self,
+        block: Node<'a>,
+        source: &[u8],
+        cursor_point: tree_sitter::Point,
+    ) -> Option<(Node<'a>, String)> {
         let mut cursor = block.walk();
 
         for child in block.children(&mut cursor) {
@@ -843,7 +881,12 @@ impl ParserEngine {
     }
 
     /// Recursively search for ERROR nodes with function calls.
-    fn find_error_call_recursive<'a>(&self, node: Node<'a>, source: &[u8], cursor_point: tree_sitter::Point) -> Option<(Node<'a>, String)> {
+    fn find_error_call_recursive<'a>(
+        &self,
+        node: Node<'a>,
+        source: &[u8],
+        cursor_point: tree_sitter::Point,
+    ) -> Option<(Node<'a>, String)> {
         let kind = node.kind();
 
         if kind == "ERROR" {
@@ -934,7 +977,12 @@ impl ParserEngine {
     }
 
     /// Build SignatureInfo from a definition node.
-    fn build_signature_info(&self, def_node: Node, source: &[u8], active_param: u32) -> Option<SignatureInfo> {
+    fn build_signature_info(
+        &self,
+        def_node: Node,
+        source: &[u8],
+        active_param: u32,
+    ) -> Option<SignatureInfo> {
         let kind = def_node.kind();
 
         let (prefix, name, doc) = match kind {
@@ -962,7 +1010,13 @@ impl ParserEngine {
 
         // Build signature label
         let params_str: Vec<_> = params.iter().map(|p| p.label.as_str()).collect();
-        let label = format!("{} {}({}): {}", prefix, name, params_str.join(", "), return_type);
+        let label = format!(
+            "{} {}({}): {}",
+            prefix,
+            name,
+            params_str.join(", "),
+            return_type
+        );
 
         Some(SignatureInfo {
             label,
@@ -1039,11 +1093,10 @@ impl ParserEngine {
 
         // Extract any doc comments preceding the definition (for relevant node types)
         let doc_comment = match kind {
-            "cdefn" | "edecl" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" => {
-                self.extract_doc_comment(node, source)
-                    .map(|doc| format!("\n\n---\n\n{}", doc))
-                    .unwrap_or_default()
-            }
+            "cdefn" | "edecl" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" => self
+                .extract_doc_comment(node, source)
+                .map(|doc| format!("\n\n---\n\n{}", doc))
+                .unwrap_or_default(),
             _ => String::new(),
         };
 
@@ -1114,7 +1167,10 @@ impl ParserEngine {
                     let location = self.node_to_symbol_location(node);
                     let fields = self.extract_struct_fields(node, source);
                     let doc = if fields.is_empty() {
-                        format!("Struct type\n\n```compact\nstruct {}\n```{}", name, doc_comment)
+                        format!(
+                            "Struct type\n\n```compact\nstruct {}\n```{}",
+                            name, doc_comment
+                        )
                     } else {
                         format!(
                             "Struct type\n\n```compact\nstruct {}\n```\n\nFields:\n{}{}",
@@ -1242,7 +1298,10 @@ impl ParserEngine {
             let message = if text.trim().is_empty() {
                 "Syntax error: unexpected token".to_string()
             } else {
-                format!("Syntax error: unexpected '{}'", text.chars().take(30).collect::<String>())
+                format!(
+                    "Syntax error: unexpected '{}'",
+                    text.chars().take(30).collect::<String>()
+                )
             };
             errors.push(SyntaxError {
                 message,
@@ -1290,12 +1349,7 @@ impl ParserEngine {
     }
 
     /// Recursively collect semantic tokens from the AST.
-    fn collect_semantic_tokens(
-        &self,
-        node: Node,
-        source: &[u8],
-        tokens: &mut Vec<SemanticToken>,
-    ) {
+    fn collect_semantic_tokens(&self, node: Node, source: &[u8], tokens: &mut Vec<SemanticToken>) {
         match node.kind() {
             // Circuit/function definitions
             "cdefn" | "edecl" | "wdecl" => {
@@ -1334,7 +1388,9 @@ impl ParserEngine {
                 }
                 // Also collect enum variants
                 let mut cursor = node.walk();
-                let enum_name = node.child_by_field_name("name").map(|n| self.node_text(n, source));
+                let enum_name = node
+                    .child_by_field_name("name")
+                    .map(|n| self.node_text(n, source));
                 for child in node.children(&mut cursor) {
                     if child.kind() == "id" {
                         let text = self.node_text(child, source);
@@ -1902,7 +1958,10 @@ circuit main(): Field {
         let info = parser.signature_help(source, 5, 15);
         assert!(info.is_some(), "Should find signature help");
         let info = info.unwrap();
-        assert!(info.label.contains("add"), "Label should contain function name");
+        assert!(
+            info.label.contains("add"),
+            "Label should contain function name"
+        );
         assert_eq!(info.parameters.len(), 2, "Should have 2 parameters");
         assert_eq!(info.active_parameter, 0, "First parameter should be active");
     }
@@ -1921,7 +1980,10 @@ circuit main(): Field {
         let info = parser.signature_help(source, 5, 18);
         assert!(info.is_some(), "Should find signature help");
         let info = info.unwrap();
-        assert_eq!(info.active_parameter, 1, "Second parameter should be active");
+        assert_eq!(
+            info.active_parameter, 1,
+            "Second parameter should be active"
+        );
     }
 
     #[test]
@@ -1937,9 +1999,15 @@ circuit main(): Field {
 }"#;
         // Position right after opening paren (line 5, col 15)
         let info = parser.signature_help(source, 5, 15);
-        assert!(info.is_some(), "Should find signature help for incomplete call");
+        assert!(
+            info.is_some(),
+            "Should find signature help for incomplete call"
+        );
         let info = info.unwrap();
-        assert!(info.label.contains("add"), "Label should contain function name");
+        assert!(
+            info.label.contains("add"),
+            "Label should contain function name"
+        );
     }
 
     #[test]
@@ -2020,9 +2088,15 @@ enum Color {
         let symbols = parser.get_completion_symbols(source);
 
         // Should find circuit, struct, and enum
-        assert!(symbols.iter().any(|s| s.name == "add" && s.kind == CompletionSymbolKind::Function));
-        assert!(symbols.iter().any(|s| s.name == "Point" && s.kind == CompletionSymbolKind::Struct));
-        assert!(symbols.iter().any(|s| s.name == "Color" && s.kind == CompletionSymbolKind::Enum));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "add" && s.kind == CompletionSymbolKind::Function));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Point" && s.kind == CompletionSymbolKind::Struct));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Color" && s.kind == CompletionSymbolKind::Enum));
     }
 
     #[test]
@@ -2045,7 +2119,10 @@ circuit main(): Field {
 
         // Standard library import (no prefix, not a file)
         let stdlib = imports.iter().find(|i| i.path == "CompactStandardLibrary");
-        assert!(stdlib.is_some(), "Should find CompactStandardLibrary import");
+        assert!(
+            stdlib.is_some(),
+            "Should find CompactStandardLibrary import"
+        );
         let stdlib = stdlib.unwrap();
         assert!(!stdlib.is_file, "Should not be a file import");
         assert!(stdlib.prefix.is_none(), "Should have no prefix");
@@ -2055,14 +2132,24 @@ circuit main(): Field {
         assert!(utils.is_some(), "Should find Utils import");
         let utils = utils.unwrap();
         assert!(utils.is_file, "Should be a file import");
-        assert_eq!(utils.prefix.as_deref(), Some("Utils_"), "Should have Utils_ prefix");
+        assert_eq!(
+            utils.prefix.as_deref(),
+            Some("Utils_"),
+            "Should have Utils_ prefix"
+        );
 
         // Initializable import with prefix
-        let init = imports.iter().find(|i| i.path == "../security/Initializable");
+        let init = imports
+            .iter()
+            .find(|i| i.path == "../security/Initializable");
         assert!(init.is_some(), "Should find Initializable import");
         let init = init.unwrap();
         assert!(init.is_file, "Should be a file import");
-        assert_eq!(init.prefix.as_deref(), Some("Init_"), "Should have Init_ prefix");
+        assert_eq!(
+            init.prefix.as_deref(),
+            Some("Init_"),
+            "Should have Init_ prefix"
+        );
 
         // No prefix file import
         let no_prefix = imports.iter().find(|i| i.path == "no_prefix_file");
@@ -2089,10 +2176,18 @@ module Utils {
 
         // Should find "add" circuit inside the module
         let add_symbol = symbols.iter().find(|s| s.name == "add");
-        assert!(add_symbol.is_some(), "Should find 'add' circuit inside module. Found: {:?}", symbols);
+        assert!(
+            add_symbol.is_some(),
+            "Should find 'add' circuit inside module. Found: {:?}",
+            symbols
+        );
 
         let add_symbol = add_symbol.unwrap();
-        assert_eq!(add_symbol.kind, CompletionSymbolKind::Function, "Should be a Function");
+        assert_eq!(
+            add_symbol.kind,
+            CompletionSymbolKind::Function,
+            "Should be a Function"
+        );
     }
 
     #[test]
@@ -2115,7 +2210,10 @@ circuit add(a: Field, b: Field): Field {
     return 1;
 "#;
         let errors = parser.get_syntax_errors(source);
-        assert!(!errors.is_empty(), "Missing brace should produce syntax error");
+        assert!(
+            !errors.is_empty(),
+            "Missing brace should produce syntax error"
+        );
     }
 
     #[test]
@@ -2124,7 +2222,10 @@ circuit add(a: Field, b: Field): Field {
         // Invalid syntax - unexpected token
         let source = r#"circuit !!!invalid(): Field { return 1; }"#;
         let errors = parser.get_syntax_errors(source);
-        assert!(!errors.is_empty(), "Invalid identifier should produce syntax error");
+        assert!(
+            !errors.is_empty(),
+            "Invalid identifier should produce syntax error"
+        );
     }
 
     #[test]
@@ -2148,9 +2249,18 @@ circuit broken3 {
         // Should find multiple syntax errors, not just the first one
         println!("Found {} syntax errors:", errors.len());
         for (i, err) in errors.iter().enumerate() {
-            println!("  {}: {} at line {}", i + 1, err.message, err.range.start.line + 1);
+            println!(
+                "  {}: {} at line {}",
+                i + 1,
+                err.message,
+                err.range.start.line + 1
+            );
         }
-        assert!(errors.len() >= 2, "Should find multiple syntax errors, found {}", errors.len());
+        assert!(
+            errors.len() >= 2,
+            "Should find multiple syntax errors, found {}",
+            errors.len()
+        );
     }
 
     #[test]
@@ -2178,7 +2288,9 @@ struct Point {
             .collect();
         assert!(!function_tokens.is_empty(), "Should find function tokens");
         assert!(
-            function_tokens.iter().any(|t| t.modifiers.contains(&SemanticTokenModifier::Declaration)),
+            function_tokens
+                .iter()
+                .any(|t| t.modifiers.contains(&SemanticTokenModifier::Declaration)),
             "Function should have Declaration modifier"
         );
 
@@ -2189,7 +2301,9 @@ struct Point {
             .collect();
         assert!(!type_tokens.is_empty(), "Should find type tokens");
         assert!(
-            type_tokens.iter().any(|t| t.modifiers.contains(&SemanticTokenModifier::DefaultLibrary)),
+            type_tokens
+                .iter()
+                .any(|t| t.modifiers.contains(&SemanticTokenModifier::DefaultLibrary)),
             "Field type should have DefaultLibrary modifier"
         );
 
@@ -2212,7 +2326,10 @@ struct Point {
             .iter()
             .filter(|t| t.token_type == SemanticTokenType::Property)
             .collect();
-        assert!(!property_tokens.is_empty(), "Should find property tokens for struct fields");
+        assert!(
+            !property_tokens.is_empty(),
+            "Should find property tokens for struct fields"
+        );
     }
 
     #[test]
@@ -2309,7 +2426,10 @@ circuit use_point(p: Point): Field {
         let refs = parser.find_references(source, "Point");
 
         // Should find: 1 definition + usages in return type, function param type
-        assert!(refs.len() >= 3, "Should find at least 3 references to 'Point'");
+        assert!(
+            refs.len() >= 3,
+            "Should find at least 3 references to 'Point'"
+        );
 
         // Check that exactly one is a definition
         let definitions: Vec<_> = refs.iter().filter(|r| r.is_definition).collect();
@@ -2353,7 +2473,11 @@ circuit withdraw(amount: Uint<64>): Uint<64> {
 
         // Check that exactly one is a definition
         let definitions: Vec<_> = refs.iter().filter(|r| r.is_definition).collect();
-        assert_eq!(definitions.len(), 1, "Should find exactly 1 definition of 'balance'");
+        assert_eq!(
+            definitions.len(),
+            1,
+            "Should find exactly 1 definition of 'balance'"
+        );
     }
 
     #[test]
@@ -2386,11 +2510,16 @@ ledger counter: Counter;
             .iter()
             .filter(|t| t.token_type == SemanticTokenType::Property)
             .collect();
-        assert!(property_tokens.len() >= 2, "Should find at least 2 property tokens for ledgers");
+        assert!(
+            property_tokens.len() >= 2,
+            "Should find at least 2 property tokens for ledgers"
+        );
 
         // Check that ledger tokens have readonly modifier
         assert!(
-            property_tokens.iter().any(|t| t.modifiers.contains(&SemanticTokenModifier::Readonly)),
+            property_tokens
+                .iter()
+                .any(|t| t.modifiers.contains(&SemanticTokenModifier::Readonly)),
             "Ledger should have Readonly modifier"
         );
     }
@@ -2409,11 +2538,16 @@ witness get_private_key(id: Uint<32>): Bytes<32>;
             .iter()
             .filter(|t| t.token_type == SemanticTokenType::Function)
             .collect();
-        assert!(function_tokens.len() >= 2, "Should find at least 2 function tokens for witnesses");
+        assert!(
+            function_tokens.len() >= 2,
+            "Should find at least 2 function tokens for witnesses"
+        );
 
         // Check that witness tokens have declaration modifier
         assert!(
-            function_tokens.iter().all(|t| t.modifiers.contains(&SemanticTokenModifier::Declaration)),
+            function_tokens
+                .iter()
+                .all(|t| t.modifiers.contains(&SemanticTokenModifier::Declaration)),
             "Witness functions should have Declaration modifier"
         );
     }
@@ -2437,12 +2571,19 @@ circuit test(x: Field): Field {
         let ranges = parser.folding_ranges(source);
 
         // Should find at least 3 folding ranges: circuit body + 2 if statements
-        assert!(ranges.len() >= 3, "Should find at least 3 folding ranges for nested blocks, found {}", ranges.len());
+        assert!(
+            ranges.len() >= 3,
+            "Should find at least 3 folding ranges for nested blocks, found {}",
+            ranges.len()
+        );
 
         // Check that we have different starting lines for nested structures
         let start_lines: Vec<_> = ranges.iter().map(|r| r.start_line).collect();
         let unique_lines: std::collections::HashSet<_> = start_lines.iter().collect();
-        assert!(unique_lines.len() >= 2, "Should have folding ranges on different lines");
+        assert!(
+            unique_lines.len() >= 2,
+            "Should have folding ranges on different lines"
+        );
     }
 
     #[test]
@@ -2469,9 +2610,18 @@ enum Status {
 
         // Verify variant names
         let variant_names: Vec<_> = children.iter().map(|c| c.name.as_str()).collect();
-        assert!(variant_names.contains(&"Pending"), "Should have Pending variant");
-        assert!(variant_names.contains(&"Active"), "Should have Active variant");
-        assert!(variant_names.contains(&"Completed"), "Should have Completed variant");
+        assert!(
+            variant_names.contains(&"Pending"),
+            "Should have Pending variant"
+        );
+        assert!(
+            variant_names.contains(&"Active"),
+            "Should have Active variant"
+        );
+        assert!(
+            variant_names.contains(&"Completed"),
+            "Should have Completed variant"
+        );
     }
 
     #[test]
@@ -2528,7 +2678,10 @@ module Math {
         let children = symbols[0].children.as_ref();
         assert!(children.is_some(), "Module should have children");
         let children = children.unwrap();
-        assert!(children.len() >= 2, "Should find at least 2 circuits in module");
+        assert!(
+            children.len() >= 2,
+            "Should find at least 2 circuits in module"
+        );
     }
 
     #[test]
@@ -2539,8 +2692,14 @@ module Math {
         let info = parser.hover_info(source, 0, 7);
         assert!(info.is_some(), "Should find hover info for ledger");
         let info = info.unwrap();
-        assert!(info.content.contains("ledger"), "Hover should mention 'ledger'");
-        assert!(info.content.contains("balance"), "Hover should contain name 'balance'");
+        assert!(
+            info.content.contains("ledger"),
+            "Hover should mention 'ledger'"
+        );
+        assert!(
+            info.content.contains("balance"),
+            "Hover should contain name 'balance'"
+        );
     }
 
     #[test]
@@ -2551,8 +2710,10 @@ module Math {
         let info = parser.hover_info(source, 0, 8);
         assert!(info.is_some(), "Should find hover info for witness");
         let info = info.unwrap();
-        assert!(info.content.contains("witness") || info.content.contains("Witness"),
-                "Hover should mention 'witness'");
+        assert!(
+            info.content.contains("witness") || info.content.contains("Witness"),
+            "Hover should mention 'witness'"
+        );
     }
 
     #[test]
@@ -2574,17 +2735,35 @@ struct Config {
         let circuit_sym = symbols.iter().find(|s| s.name == "calculate");
         assert!(circuit_sym.is_some(), "Should find calculate circuit");
         let circuit_sym = circuit_sym.unwrap();
-        assert!(circuit_sym.documentation.is_some(), "Circuit should have documentation");
-        assert!(circuit_sym.documentation.as_ref().unwrap().contains("Circuit function"),
-                "Documentation should mention Circuit function");
+        assert!(
+            circuit_sym.documentation.is_some(),
+            "Circuit should have documentation"
+        );
+        assert!(
+            circuit_sym
+                .documentation
+                .as_ref()
+                .unwrap()
+                .contains("Circuit function"),
+            "Documentation should mention Circuit function"
+        );
 
         // Check struct has documentation
         let struct_sym = symbols.iter().find(|s| s.name == "Config");
         assert!(struct_sym.is_some(), "Should find Config struct");
         let struct_sym = struct_sym.unwrap();
-        assert!(struct_sym.documentation.is_some(), "Struct should have documentation");
-        assert!(struct_sym.documentation.as_ref().unwrap().contains("Struct type"),
-                "Documentation should mention Struct type");
+        assert!(
+            struct_sym.documentation.is_some(),
+            "Struct should have documentation"
+        );
+        assert!(
+            struct_sym
+                .documentation
+                .as_ref()
+                .unwrap()
+                .contains("Struct type"),
+            "Documentation should mention Struct type"
+        );
     }
 
     #[test]
@@ -2610,7 +2789,11 @@ circuit main(): Field {
 
         let helpers_import = imports.iter().find(|i| i.path.contains("Helpers"));
         assert!(helpers_import.is_some(), "Should find Helpers import");
-        assert_eq!(helpers_import.unwrap().prefix.as_deref(), Some("Help_"), "Should have Help_ prefix");
+        assert_eq!(
+            helpers_import.unwrap().prefix.as_deref(),
+            Some("Help_"),
+            "Should have Help_ prefix"
+        );
     }
 
     // ========== Doc comment tests ==========
@@ -2639,8 +2822,14 @@ circuit main(): Field {
  * It has multiple lines.
  */"#;
         let cleaned = parser.clean_comment_text(jsdoc);
-        assert!(cleaned.contains("This is a JSDoc comment"), "Should contain first line");
-        assert!(cleaned.contains("It has multiple lines"), "Should contain second line");
+        assert!(
+            cleaned.contains("This is a JSDoc comment"),
+            "Should contain first line"
+        );
+        assert!(
+            cleaned.contains("It has multiple lines"),
+            "Should contain second line"
+        );
     }
 
     #[test]
@@ -2655,7 +2844,10 @@ circuit add(a: Field, b: Field): Field {
         let info = parser.hover_info(source, 2, 8);
         assert!(info.is_some(), "Should find hover info");
         let info = info.unwrap();
-        assert!(info.content.contains("Circuit function"), "Should contain type description");
+        assert!(
+            info.content.contains("Circuit function"),
+            "Should contain type description"
+        );
         assert!(
             info.content.contains("Adds two field elements together"),
             "Should contain doc comment: {}",
@@ -2680,7 +2872,10 @@ struct Point {
         let info = parser.hover_info(source, 1, 7);
         assert!(info.is_some(), "Should find hover info");
         let info = info.unwrap();
-        assert!(info.content.contains("Struct type"), "Should contain type description");
+        assert!(
+            info.content.contains("Struct type"),
+            "Should contain type description"
+        );
         assert!(
             info.content.contains("A point in 2D space"),
             "Should contain block doc comment: {}",
@@ -2735,7 +2930,10 @@ struct Point {
         let info = parser.hover_info(source, 0, 8);
         assert!(info.is_some(), "Should find hover info");
         let info = info.unwrap();
-        assert!(info.content.contains("Circuit function"), "Should contain type description");
+        assert!(
+            info.content.contains("Circuit function"),
+            "Should contain type description"
+        );
         // Should not have the separator since there's no doc comment
         assert!(
             !info.content.contains("---\n\n"),

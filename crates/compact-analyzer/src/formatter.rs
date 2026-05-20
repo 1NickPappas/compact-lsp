@@ -44,9 +44,7 @@ impl FormatterEngine {
 
         // 2. Check ~/compactc/format-compact
         if let Ok(home) = std::env::var("HOME") {
-            let path = Path::new(&home)
-                .join("compactc")
-                .join("format-compact");
+            let path = Path::new(&home).join("compactc").join("format-compact");
             if path.exists() {
                 let path_str = path.to_string_lossy().to_string();
                 tracing::info!("Found formatter at: {}", path_str);
@@ -93,8 +91,8 @@ impl FormatterEngine {
         };
 
         // Create temp file with content
-        let temp_dir = tempfile::tempdir()
-            .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+        let temp_dir =
+            tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
         let temp_file = temp_dir.path().join("format_input.compact");
         tokio::fs::write(&temp_file, content)

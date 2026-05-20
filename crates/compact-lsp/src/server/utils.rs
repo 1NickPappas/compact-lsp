@@ -126,7 +126,12 @@ pub fn get_function_call_name(content: &str, line: u32, character: u32) -> Optio
     }
 
     // Skip any whitespace
-    while idx > 0 && chars.get(idx - 1).map(|c| c.is_whitespace()).unwrap_or(false) {
+    while idx > 0
+        && chars
+            .get(idx - 1)
+            .map(|c| c.is_whitespace())
+            .unwrap_or(false)
+    {
         idx -= 1;
     }
 
@@ -416,30 +421,21 @@ mod tests {
     fn test_detect_dot_context_right_after_dot() {
         // "round." with cursor at position 6 (after the dot)
         let content = "round.";
-        assert_eq!(
-            detect_dot_context(content, 0, 6),
-            Some("round".to_string())
-        );
+        assert_eq!(detect_dot_context(content, 0, 6), Some("round".to_string()));
     }
 
     #[test]
     fn test_detect_dot_context_partial_identifier() {
         // "round.inc" with cursor at position 9 (after "inc")
         let content = "round.inc";
-        assert_eq!(
-            detect_dot_context(content, 0, 9),
-            Some("round".to_string())
-        );
+        assert_eq!(detect_dot_context(content, 0, 9), Some("round".to_string()));
     }
 
     #[test]
     fn test_detect_dot_context_mid_partial() {
         // "round.increment" with cursor in middle of "increment"
         let content = "round.increment";
-        assert_eq!(
-            detect_dot_context(content, 0, 8),
-            Some("round".to_string())
-        );
+        assert_eq!(detect_dot_context(content, 0, 8), Some("round".to_string()));
     }
 
     #[test]
@@ -465,11 +461,9 @@ mod tests {
 
     #[test]
     fn test_detect_dot_context_multiline() {
-        let content = "ledger round: Counter;\nexport circuit incr(): [] {\n  round.increment(1);\n}";
+        let content =
+            "ledger round: Counter;\nexport circuit incr(): [] {\n  round.increment(1);\n}";
         // Line 2: "  round.increment(1);" - cursor on "increment" at col 8
-        assert_eq!(
-            detect_dot_context(content, 2, 8),
-            Some("round".to_string())
-        );
+        assert_eq!(detect_dot_context(content, 2, 8), Some("round".to_string()));
     }
 }

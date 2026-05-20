@@ -296,9 +296,8 @@ impl Default for DiagnosticEngine {
 /// Returns None if the line doesn't match the expected format.
 fn parse_error_line(line: &str) -> Option<Diagnostic> {
     // Regex pattern for compiler errors
-    let re = regex::Regex::new(
-        r"^Exception:\s*(\S+)\s+line\s+(\d+)\s+char\s+(\d+):\s*(.+)$"
-    ).ok()?;
+    let re =
+        regex::Regex::new(r"^Exception:\s*(\S+)\s+line\s+(\d+)\s+char\s+(\d+):\s*(.+)$").ok()?;
 
     let caps = re.captures(line)?;
 

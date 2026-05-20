@@ -25,8 +25,7 @@ async fn main() {
     // Example: RUST_LOG=compact_lsp=debug cargo run
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_writer(std::io::stderr) // IMPORTANT: write to stderr, not stdout
         .init();
@@ -40,10 +39,8 @@ async fn main() {
     // Build the LSP service
     // LspService::build takes a closure that receives a Client
     // The Client is used to send notifications TO the editor (e.g., diagnostics)
-    let (service, socket) = LspService::build(|client| {
-        server::CompactLanguageServer::new(client)
-    })
-    .finish();
+    let (service, socket) =
+        LspService::build(|client| server::CompactLanguageServer::new(client)).finish();
 
     // Start the server - this runs until the editor disconnects
     Server::new(stdin, stdout, socket).serve(service).await;

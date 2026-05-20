@@ -482,7 +482,9 @@ mod tests {
 
     #[test]
     fn test_generate_doc_file_counter() {
-        let info = doc_cache().get("Counter").expect("Counter doc should exist");
+        let info = doc_cache()
+            .get("Counter")
+            .expect("Counter doc should exist");
         let content = std::fs::read_to_string(&info.path).expect("Counter.md should be readable");
 
         assert!(content.starts_with("# Counter\n"));
@@ -527,7 +529,9 @@ mod tests {
 
     #[test]
     fn test_method_line_numbers_are_correct() {
-        let info = doc_cache().get("Counter").expect("Counter doc should exist");
+        let info = doc_cache()
+            .get("Counter")
+            .expect("Counter doc should exist");
         let content = std::fs::read_to_string(&info.path).expect("Counter.md should be readable");
         let lines: Vec<&str> = content.lines().collect();
 

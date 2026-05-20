@@ -167,7 +167,9 @@ impl CompactLanguageServer {
             })
             .collect();
 
-        self.client.publish_diagnostics(uri, diagnostics, None).await;
+        self.client
+            .publish_diagnostics(uri, diagnostics, None)
+            .await;
     }
 
     /// Schedule semantic diagnostics with debounce.
@@ -202,7 +204,9 @@ impl CompactLanguageServer {
                     .collect()
             };
 
-            let compiler_diagnostics = diagnostic_engine.diagnose_content(&uri_clone, &content).await;
+            let compiler_diagnostics = diagnostic_engine
+                .diagnose_content(&uri_clone, &content)
+                .await;
 
             let mut all_diagnostics = syntax_diagnostics;
             all_diagnostics.extend(compiler_diagnostics);
@@ -281,7 +285,11 @@ impl CompactLanguageServer {
             symbols_found
         );
 
-        let dep_count: usize = self.reverse_dependencies.iter().map(|e| e.value().len()).sum();
+        let dep_count: usize = self
+            .reverse_dependencies
+            .iter()
+            .map(|e| e.value().len())
+            .sum();
         tracing::info!("Reverse dependencies: {} entries", dep_count);
     }
 
@@ -292,7 +300,8 @@ impl CompactLanguageServer {
             parser.get_completion_symbols(content)
         };
 
-        self.source_cache.insert(uri.to_string(), content.to_string());
+        self.source_cache
+            .insert(uri.to_string(), content.to_string());
 
         if symbols.is_empty() {
             self.symbol_cache.remove(uri);
@@ -339,7 +348,11 @@ impl CompactLanguageServer {
     }
 
     /// Find an imported symbol by name (with prefix handling).
-    fn find_imported_symbol(&self, current_uri: &str, name: &str) -> Option<(String, CompletionSymbol)> {
+    fn find_imported_symbol(
+        &self,
+        current_uri: &str,
+        name: &str,
+    ) -> Option<(String, CompletionSymbol)> {
         let file_imports = {
             let content = self.documents.get(current_uri)?.content.to_string();
             let mut parser = self.parser_engine.lock().unwrap();
@@ -383,7 +396,10 @@ impl CompactLanguageServer {
     }
 
     /// Build a SignatureHelp response from SignatureInfo.
-    fn build_signature_help_response(&self, info: compact_analyzer::SignatureInfo) -> SignatureHelp {
+    fn build_signature_help_response(
+        &self,
+        info: compact_analyzer::SignatureInfo,
+    ) -> SignatureHelp {
         let parameters: Vec<ParameterInformation> = info
             .parameters
             .iter()
@@ -648,10 +664,7 @@ impl LanguageServer for CompactLanguageServer {
             .await;
     }
 
-    async fn completion(
-        &self,
-        params: CompletionParams,
-    ) -> Result<Option<CompletionResponse>> {
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
 
@@ -683,7 +696,11 @@ impl LanguageServer for CompactLanguageServer {
                 };
                 // Fallback: `kernel` is implicitly available without a ledger declaration
                 let var_type = var_type.or_else(|| {
-                    if var_name == "kernel" { Some("Kernel".to_string()) } else { None }
+                    if var_name == "kernel" {
+                        Some("Kernel".to_string())
+                    } else {
+                        None
+                    }
                 });
                 if let Some(type_str) = var_type {
                     let base_type = builtins::extract_base_type(&type_str);
@@ -843,7 +860,10 @@ impl LanguageServer for CompactLanguageServer {
             ("Cell", "Mutable cell for ledger state"),
             ("List", "Ordered list for ledger state"),
             ("MerkleTree", "Merkle tree for ledger state"),
-            ("HistoricMerkleTree", "Historic Merkle tree with root history"),
+            (
+                "HistoricMerkleTree",
+                "Historic Merkle tree with root history",
+            ),
             ("Kernel", "Built-in kernel operations"),
             ("Address", "Blockchain address type"),
             ("Void", "Void return type"),
@@ -861,16 +881,40 @@ impl LanguageServer for CompactLanguageServer {
 
         // Type snippets
         let type_snippets = [
-            ("Uint<>", "Uint<${1:32}>", "Unsigned integer (e.g., Uint<32>)"),
+            (
+                "Uint<>",
+                "Uint<${1:32}>",
+                "Unsigned integer (e.g., Uint<32>)",
+            ),
             ("Bytes<>", "Bytes<${1:32}>", "Byte array (e.g., Bytes<32>)"),
-            ("Vector<>", "Vector<${1:10}, ${2:Field}>", "Vector (e.g., Vector<10, Field>)"),
-            ("Opaque<>", "Opaque<\"${1:name}\">", "Opaque type (e.g., Opaque<\"mytype\">)"),
-            ("Map<>", "Map<${1:Key}, ${2:Value}>", "Map (e.g., Map<Address, Uint<64>>)"),
+            (
+                "Vector<>",
+                "Vector<${1:10}, ${2:Field}>",
+                "Vector (e.g., Vector<10, Field>)",
+            ),
+            (
+                "Opaque<>",
+                "Opaque<\"${1:name}\">",
+                "Opaque type (e.g., Opaque<\"mytype\">)",
+            ),
+            (
+                "Map<>",
+                "Map<${1:Key}, ${2:Value}>",
+                "Map (e.g., Map<Address, Uint<64>>)",
+            ),
             ("Set<>", "Set<${1:T}>", "Set (e.g., Set<Address>)"),
             ("Cell<>", "Cell<${1:T}>", "Cell (e.g., Cell<Field>)"),
             ("List<>", "List<${1:T}>", "List (e.g., List<Field>)"),
-            ("MerkleTree<>", "MerkleTree<${1:32}, ${2:Field}>", "Merkle tree (e.g., MerkleTree<32, Bytes<32>>)"),
-            ("HistoricMerkleTree<>", "HistoricMerkleTree<${1:32}, ${2:Field}>", "Historic Merkle tree"),
+            (
+                "MerkleTree<>",
+                "MerkleTree<${1:32}, ${2:Field}>",
+                "Merkle tree (e.g., MerkleTree<32, Bytes<32>>)",
+            ),
+            (
+                "HistoricMerkleTree<>",
+                "HistoricMerkleTree<${1:32}, ${2:Field}>",
+                "Historic Merkle tree",
+            ),
         ];
 
         for (label, snippet, detail) in type_snippets {
@@ -901,8 +945,16 @@ impl LanguageServer for CompactLanguageServer {
         // Stdlib parameterized type snippets
         let stdlib_type_snippets = [
             ("Maybe<>", "Maybe<${1:T}>", "Optional container (Maybe<T>)"),
-            ("Either<>", "Either<${1:A}, ${2:B}>", "Union type (Either<A, B>)"),
-            ("MerkleTreePath<>", "MerkleTreePath<${1:n}, ${2:T}>", "Merkle tree path proof"),
+            (
+                "Either<>",
+                "Either<${1:A}, ${2:B}>",
+                "Union type (Either<A, B>)",
+            ),
+            (
+                "MerkleTreePath<>",
+                "MerkleTreePath<${1:n}, ${2:T}>",
+                "Merkle tree path proof",
+            ),
         ];
 
         for (label, snippet, detail) in stdlib_type_snippets {
@@ -946,45 +998,190 @@ impl LanguageServer for CompactLanguageServer {
         // Code snippets
         let snippets = [
             // Circuit snippets
-            ("circuit", "circuit snippet", "circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}", "Circuit function template"),
-            ("export circuit", "export circuit snippet", "export circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}", "Exported circuit function template"),
-            ("pure circuit", "pure circuit snippet", "pure circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}", "Pure circuit function template"),
-            ("export pure circuit", "export pure circuit snippet", "export pure circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}", "Exported pure circuit function template"),
+            (
+                "circuit",
+                "circuit snippet",
+                "circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Circuit function template",
+            ),
+            (
+                "export circuit",
+                "export circuit snippet",
+                "export circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Exported circuit function template",
+            ),
+            (
+                "pure circuit",
+                "pure circuit snippet",
+                "pure circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Pure circuit function template",
+            ),
+            (
+                "export pure circuit",
+                "export pure circuit snippet",
+                "export pure circuit ${1:name}(${2:params}): ${3:ReturnType} {\n\t$0\n}",
+                "Exported pure circuit function template",
+            ),
             // Struct snippets
-            ("struct", "struct snippet", "struct ${1:Name} {\n\t${2:field}: ${3:Type};\n}", "Struct definition template"),
-            ("export struct", "export struct snippet", "export struct ${1:Name} {\n\t${2:field}: ${3:Type};\n}", "Exported struct definition template"),
+            (
+                "struct",
+                "struct snippet",
+                "struct ${1:Name} {\n\t${2:field}: ${3:Type};\n}",
+                "Struct definition template",
+            ),
+            (
+                "export struct",
+                "export struct snippet",
+                "export struct ${1:Name} {\n\t${2:field}: ${3:Type};\n}",
+                "Exported struct definition template",
+            ),
             // Enum snippets
-            ("enum", "enum snippet", "enum ${1:Name} {\n\t${2:Variant1},\n\t${3:Variant2},\n}", "Enum definition template"),
-            ("export enum", "export enum snippet", "export enum ${1:Name} {\n\t${2:Variant1},\n\t${3:Variant2},\n}", "Exported enum definition template"),
+            (
+                "enum",
+                "enum snippet",
+                "enum ${1:Name} {\n\t${2:Variant1},\n\t${3:Variant2},\n}",
+                "Enum definition template",
+            ),
+            (
+                "export enum",
+                "export enum snippet",
+                "export enum ${1:Name} {\n\t${2:Variant1},\n\t${3:Variant2},\n}",
+                "Exported enum definition template",
+            ),
             // Ledger snippets
-            ("ledger", "ledger snippet", "ledger ${1:name}: ${2:Type};", "Ledger declaration template"),
-            ("export ledger", "export ledger snippet", "export ledger ${1:name}: ${2:Type};", "Exported ledger declaration template"),
-            ("sealed ledger", "sealed ledger snippet", "sealed ledger ${1:name}: ${2:Type};", "Sealed ledger declaration template"),
-            ("export sealed ledger", "export sealed ledger snippet", "export sealed ledger ${1:name}: ${2:Type};", "Exported sealed ledger declaration template"),
+            (
+                "ledger",
+                "ledger snippet",
+                "ledger ${1:name}: ${2:Type};",
+                "Ledger declaration template",
+            ),
+            (
+                "export ledger",
+                "export ledger snippet",
+                "export ledger ${1:name}: ${2:Type};",
+                "Exported ledger declaration template",
+            ),
+            (
+                "sealed ledger",
+                "sealed ledger snippet",
+                "sealed ledger ${1:name}: ${2:Type};",
+                "Sealed ledger declaration template",
+            ),
+            (
+                "export sealed ledger",
+                "export sealed ledger snippet",
+                "export sealed ledger ${1:name}: ${2:Type};",
+                "Exported sealed ledger declaration template",
+            ),
             // Witness snippets
-            ("witness", "witness snippet", "witness ${1:name}(${2:params}): ${3:ReturnType};", "Witness declaration template"),
-            ("export witness", "export witness snippet", "export witness ${1:name}(${2:params}): ${3:ReturnType};", "Exported witness declaration template"),
+            (
+                "witness",
+                "witness snippet",
+                "witness ${1:name}(${2:params}): ${3:ReturnType};",
+                "Witness declaration template",
+            ),
+            (
+                "export witness",
+                "export witness snippet",
+                "export witness ${1:name}(${2:params}): ${3:ReturnType};",
+                "Exported witness declaration template",
+            ),
             // Contract snippets
-            ("contract", "contract snippet", "contract ${1:Name} {\n\tcircuit ${2:fn}(${3:params}): ${4:ReturnType};\n}", "External contract declaration template"),
-            ("export contract", "export contract snippet", "export contract ${1:Name} {\n\tcircuit ${2:fn}(${3:params}): ${4:ReturnType};\n}", "Exported contract declaration template"),
+            (
+                "contract",
+                "contract snippet",
+                "contract ${1:Name} {\n\tcircuit ${2:fn}(${3:params}): ${4:ReturnType};\n}",
+                "External contract declaration template",
+            ),
+            (
+                "export contract",
+                "export contract snippet",
+                "export contract ${1:Name} {\n\tcircuit ${2:fn}(${3:params}): ${4:ReturnType};\n}",
+                "Exported contract declaration template",
+            ),
             // Module snippets
-            ("module", "module snippet", "module ${1:Name} {\n\t$0\n}", "Module definition template"),
-            ("export module", "export module snippet", "export module ${1:Name} {\n\t$0\n}", "Exported module definition template"),
+            (
+                "module",
+                "module snippet",
+                "module ${1:Name} {\n\t$0\n}",
+                "Module definition template",
+            ),
+            (
+                "export module",
+                "export module snippet",
+                "export module ${1:Name} {\n\t$0\n}",
+                "Exported module definition template",
+            ),
             // Other declaration snippets
-            ("constructor", "constructor snippet", "constructor(${1:params}) {\n\t$0\n}", "Constructor template"),
-            ("const", "const snippet", "const ${1:name}: ${2:Type} = ${3:value};", "Constant declaration template"),
-            ("include", "include snippet", "include \"${1:path}\";", "File inclusion template"),
+            (
+                "constructor",
+                "constructor snippet",
+                "constructor(${1:params}) {\n\t$0\n}",
+                "Constructor template",
+            ),
+            (
+                "const",
+                "const snippet",
+                "const ${1:name}: ${2:Type} = ${3:value};",
+                "Constant declaration template",
+            ),
+            (
+                "include",
+                "include snippet",
+                "include \"${1:path}\";",
+                "File inclusion template",
+            ),
             // Import snippets
-            ("import", "import snippet", "import ${1:Module};", "Import module template"),
-            ("import file", "import file snippet", "import \"${1:path}\";", "Import file template"),
-            ("import prefix", "import prefix snippet", "import ${1:Module} prefix ${2:alias};", "Import with prefix alias template"),
+            (
+                "import",
+                "import snippet",
+                "import ${1:Module};",
+                "Import module template",
+            ),
+            (
+                "import file",
+                "import file snippet",
+                "import \"${1:path}\";",
+                "Import file template",
+            ),
+            (
+                "import prefix",
+                "import prefix snippet",
+                "import ${1:Module} prefix ${2:alias};",
+                "Import with prefix alias template",
+            ),
             // Statement snippets
-            ("if", "if snippet", "if (${1:condition}) {\n\t$0\n}", "If statement template"),
-            ("if-else", "if-else snippet", "if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}", "If-else statement template"),
-            ("for", "for snippet", "for (const ${1:i} of ${2:0}..${3:10}) {\n\t$0\n}", "For loop template"),
-            ("assert", "assert snippet", "assert ${1:condition} \"${2:error message}\";", "Assertion template"),
+            (
+                "if",
+                "if snippet",
+                "if (${1:condition}) {\n\t$0\n}",
+                "If statement template",
+            ),
+            (
+                "if-else",
+                "if-else snippet",
+                "if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}",
+                "If-else statement template",
+            ),
+            (
+                "for",
+                "for snippet",
+                "for (const ${1:i} of ${2:0}..${3:10}) {\n\t$0\n}",
+                "For loop template",
+            ),
+            (
+                "assert",
+                "assert snippet",
+                "assert ${1:condition} \"${2:error message}\";",
+                "Assertion template",
+            ),
             // Pragma snippet
-            ("pragma", "pragma snippet", "pragma language_version ${1:>=0.14.0};", "Pragma declaration template"),
+            (
+                "pragma",
+                "pragma snippet",
+                "pragma language_version ${1:>=0.14.0};",
+                "Pragma declaration template",
+            ),
         ];
 
         for (label, filter, snippet, detail) in snippets {
@@ -1028,17 +1225,26 @@ impl LanguageServer for CompactLanguageServer {
         let last_line = content.lines().last().unwrap_or("");
 
         let range = Range {
-            start: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
             end: Position {
                 line: line_count as u32,
                 character: last_line.len() as u32,
             },
         };
 
-        Ok(Some(vec![TextEdit { range, new_text: formatted }]))
+        Ok(Some(vec![TextEdit {
+            range,
+            new_text: formatted,
+        }]))
     }
 
-    async fn document_symbol(&self, params: DocumentSymbolParams) -> Result<Option<DocumentSymbolResponse>> {
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri.to_string();
 
         let content = match self.documents.get(&uri) {
@@ -1071,7 +1277,11 @@ impl LanguageServer for CompactLanguageServer {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let position = params.text_document_position_params.position;
 
         let content = match self.documents.get(&uri) {
@@ -1106,7 +1316,11 @@ impl LanguageServer for CompactLanguageServer {
             };
             // Fallback: `kernel` is implicitly available without a ledger declaration
             let var_type = var_type.or_else(|| {
-                if ctx.base_name == "kernel" { Some("Kernel".to_string()) } else { None }
+                if ctx.base_name == "kernel" {
+                    Some("Kernel".to_string())
+                } else {
+                    None
+                }
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
@@ -1150,7 +1364,10 @@ impl LanguageServer for CompactLanguageServer {
 
         // Stdlib circuit hover (e.g., hovering on "send")
         if let Some(circ) = stdlib::find_stdlib_circuit(&word) {
-            let mut hover_text = format!("```compact\ncircuit {}\n```\n\n{}", circ.signature, circ.doc);
+            let mut hover_text = format!(
+                "```compact\ncircuit {}\n```\n\n{}",
+                circ.signature, circ.doc
+            );
             if !circ.doc_url.is_empty() {
                 hover_text.push_str(&format!(
                     "\n\n> [Compact Standard Library]({})",
@@ -1172,17 +1389,20 @@ impl LanguageServer for CompactLanguageServer {
             let mut hover_text = if st.type_params.is_empty() {
                 format!("**{}**\n\n{}\n\n", st.name, st.description)
             } else {
-                format!("**{}{}**\n\n{}\n\n", st.name, st.type_params, st.description)
+                format!(
+                    "**{}{}**\n\n{}\n\n",
+                    st.name, st.type_params, st.description
+                )
             };
             hover_text.push_str("**Fields:**\n");
             for field in &st.fields {
-                hover_text.push_str(&format!("- `{}: {}` — {}\n", field.name, field.type_str, field.doc));
+                hover_text.push_str(&format!(
+                    "- `{}: {}` — {}\n",
+                    field.name, field.type_str, field.doc
+                ));
             }
             if !st.doc_url.is_empty() {
-                hover_text.push_str(&format!(
-                    "\n> [Compact Standard Library]({})",
-                    st.doc_url
-                ));
+                hover_text.push_str(&format!("\n> [Compact Standard Library]({})", st.doc_url));
             }
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -1196,8 +1416,15 @@ impl LanguageServer for CompactLanguageServer {
         Ok(None)
     }
 
-    async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri.clone();
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .clone();
         let uri_string = uri.to_string();
         let position = params.text_document_position_params.position;
 
@@ -1230,11 +1457,17 @@ impl LanguageServer for CompactLanguageServer {
             };
             // Fallback: `kernel` is implicitly available without a ledger declaration
             let var_type = var_type.or_else(|| {
-                if ctx.base_name == "kernel" { Some("Kernel".to_string()) } else { None }
+                if ctx.base_name == "kernel" {
+                    Some("Kernel".to_string())
+                } else {
+                    None
+                }
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
-                if let Some(doc_loc) = builtins::get_builtin_method_doc_location(base_type, &ctx.member_name) {
+                if let Some(doc_loc) =
+                    builtins::get_builtin_method_doc_location(base_type, &ctx.member_name)
+                {
                     let target_uri = match Uri::from_str(&doc_loc.uri) {
                         Ok(u) => u,
                         Err(_) => return Ok(None),
@@ -1242,8 +1475,14 @@ impl LanguageServer for CompactLanguageServer {
                     return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                         uri: target_uri,
                         range: Range {
-                            start: Position { line: doc_loc.line, character: 0 },
-                            end: Position { line: doc_loc.line, character: 0 },
+                            start: Position {
+                                line: doc_loc.line,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: doc_loc.line,
+                                character: 0,
+                            },
                         },
                     })));
                 }
@@ -1264,8 +1503,14 @@ impl LanguageServer for CompactLanguageServer {
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                     uri: target_uri,
                     range: Range {
-                        start: Position { line: loc.start_line, character: loc.start_char },
-                        end: Position { line: loc.end_line, character: loc.end_char },
+                        start: Position {
+                            line: loc.start_line,
+                            character: loc.start_char,
+                        },
+                        end: Position {
+                            line: loc.end_line,
+                            character: loc.end_char,
+                        },
                     },
                 })));
             }
@@ -1281,8 +1526,14 @@ impl LanguageServer for CompactLanguageServer {
             return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                 uri: target_uri,
                 range: Range {
-                    start: Position { line: doc_loc.line, character: 0 },
-                    end: Position { line: doc_loc.line, character: 0 },
+                    start: Position {
+                        line: doc_loc.line,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: doc_loc.line,
+                        character: 0,
+                    },
                 },
             })));
         }
@@ -1296,8 +1547,14 @@ impl LanguageServer for CompactLanguageServer {
             return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                 uri: target_uri,
                 range: Range {
-                    start: Position { line: doc_loc.line, character: 0 },
-                    end: Position { line: doc_loc.line, character: 0 },
+                    start: Position {
+                        line: doc_loc.line,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: doc_loc.line,
+                        character: 0,
+                    },
                 },
             })));
         }
@@ -1311,8 +1568,14 @@ impl LanguageServer for CompactLanguageServer {
             return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                 uri: target_uri,
                 range: Range {
-                    start: Position { line: doc_loc.line, character: 0 },
-                    end: Position { line: doc_loc.line, character: 0 },
+                    start: Position {
+                        line: doc_loc.line,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: doc_loc.line,
+                        character: 0,
+                    },
                 },
             })));
         }
@@ -1321,7 +1584,11 @@ impl LanguageServer for CompactLanguageServer {
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
-        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let position = params.text_document_position_params.position;
 
         let content = match self.documents.get(&uri) {
@@ -1338,14 +1605,16 @@ impl LanguageServer for CompactLanguageServer {
             return Ok(Some(self.build_signature_help_response(info)));
         }
 
-        let func_name = match utils::get_function_call_name(&content, position.line, position.character) {
-            Some(name) => name,
-            None => return Ok(None),
-        };
+        let func_name =
+            match utils::get_function_call_name(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
 
         if let Some((_file_uri, symbol)) = self.find_imported_symbol(&uri, &func_name) {
             if let Some(detail) = &symbol.detail {
-                let active_param = utils::count_commas_before_cursor(&content, position.line, position.character);
+                let active_param =
+                    utils::count_commas_before_cursor(&content, position.line, position.character);
                 let params = utils::parse_params_from_detail(detail);
 
                 let parameters: Vec<ParameterInformation> = params
@@ -1379,9 +1648,12 @@ impl LanguageServer for CompactLanguageServer {
 
         // Stdlib circuit function signature help
         if let Some(circ) = stdlib::find_stdlib_circuit(&func_name) {
-            let active_param = utils::count_commas_before_cursor(&content, position.line, position.character);
+            let active_param =
+                utils::count_commas_before_cursor(&content, position.line, position.character);
             // Build detail string from signature: "send(input: QualifiedCoinInfo, ...): SendResult" → "(input: QualifiedCoinInfo, ...): SendResult"
-            let detail = circ.signature.find('(')
+            let detail = circ
+                .signature
+                .find('(')
                 .map(|i| &circ.signature[i..])
                 .unwrap_or(circ.signature);
             let params = utils::parse_params_from_detail(detail);
@@ -1415,7 +1687,10 @@ impl LanguageServer for CompactLanguageServer {
         Ok(None)
     }
 
-    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>> {
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri.to_string();
 
         let content = match self.documents.get(&uri) {
@@ -1435,10 +1710,18 @@ impl LanguageServer for CompactLanguageServer {
         for token in tokens {
             let line = token.range.start.line;
             let char = token.range.start.character;
-            let length = token.range.end.character.saturating_sub(token.range.start.character);
+            let length = token
+                .range
+                .end
+                .character
+                .saturating_sub(token.range.start.character);
 
             let delta_line = line - prev_line;
-            let delta_start = if delta_line == 0 { char - prev_char } else { char };
+            let delta_start = if delta_line == 0 {
+                char - prev_char
+            } else {
+                char
+            };
 
             let mut modifier_mask = 0u32;
             for modifier in &token.modifiers {
@@ -1474,10 +1757,11 @@ impl LanguageServer for CompactLanguageServer {
             None => return Ok(None),
         };
 
-        let symbol_name = match utils::get_word_at_position(&content, position.line, position.character) {
-            Some(name) => name,
-            None => return Ok(None),
-        };
+        let symbol_name =
+            match utils::get_word_at_position(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
 
         let mut all_locations = Vec::new();
 
@@ -1490,7 +1774,10 @@ impl LanguageServer for CompactLanguageServer {
             if r.is_definition && !include_declaration {
                 continue;
             }
-            all_locations.push(Location { uri: uri.clone(), range: r.range });
+            all_locations.push(Location {
+                uri: uri.clone(),
+                range: r.range,
+            });
         }
 
         for entry in self.source_cache.iter() {
@@ -1513,7 +1800,10 @@ impl LanguageServer for CompactLanguageServer {
                         continue;
                     }
                     if let Ok(loc_uri) = file_uri.parse::<lsp_types::Uri>() {
-                        all_locations.push(Location { uri: loc_uri, range: r.range });
+                        all_locations.push(Location {
+                            uri: loc_uri,
+                            range: r.range,
+                        });
                     }
                 }
             }
@@ -1526,7 +1816,10 @@ impl LanguageServer for CompactLanguageServer {
         }
     }
 
-    async fn prepare_rename(&self, params: TextDocumentPositionParams) -> Result<Option<PrepareRenameResponse>> {
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
@@ -1535,19 +1828,21 @@ impl LanguageServer for CompactLanguageServer {
             None => return Ok(None),
         };
 
-        let symbol_name = match utils::get_word_at_position(&content, position.line, position.character) {
-            Some(name) => name,
-            None => return Ok(None),
-        };
+        let symbol_name =
+            match utils::get_word_at_position(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
 
         if validation::is_keyword(&symbol_name) || validation::is_builtin_type(&symbol_name) {
             return Ok(None);
         }
 
-        let range = match utils::get_word_range_at_position(&content, position.line, position.character) {
-            Some(r) => r,
-            None => return Ok(None),
-        };
+        let range =
+            match utils::get_word_range_at_position(&content, position.line, position.character) {
+                Some(r) => r,
+                None => return Ok(None),
+            };
 
         Ok(Some(PrepareRenameResponse::Range(range)))
     }
@@ -1563,10 +1858,11 @@ impl LanguageServer for CompactLanguageServer {
             None => return Ok(None),
         };
 
-        let old_name = match utils::get_word_at_position(&content, position.line, position.character) {
-            Some(name) => name,
-            None => return Ok(None),
-        };
+        let old_name =
+            match utils::get_word_at_position(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
 
         if !validation::is_valid_identifier(&new_name) {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(
@@ -1575,11 +1871,15 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         if validation::is_keyword(&new_name) {
-            return Err(tower_lsp::jsonrpc::Error::invalid_params("Cannot rename to a keyword"));
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Cannot rename to a keyword",
+            ));
         }
 
         if validation::is_builtin_type(&new_name) {
-            return Err(tower_lsp::jsonrpc::Error::invalid_params("Cannot rename to a built-in type name"));
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Cannot rename to a built-in type name",
+            ));
         }
 
         let mut changes: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =

@@ -475,8 +475,7 @@ mod tests {
     #[test]
     fn test_field_line_numbers_are_correct() {
         for (struct_name, info) in &doc_cache().structs {
-            let content =
-                std::fs::read_to_string(&info.path).expect("Doc file should be readable");
+            let content = std::fs::read_to_string(&info.path).expect("Doc file should be readable");
             let lines: Vec<&str> = content.lines().collect();
 
             for (field_name, &line_num) in &info.field_lines {
