@@ -275,8 +275,8 @@ impl ParserEngine {
         let text = text.trim();
 
         // Handle single-line comments: // ...
-        if text.starts_with("//") {
-            return text[2..].trim().to_string();
+        if let Some(stripped) = text.strip_prefix("//") {
+            return stripped.trim().to_string();
         }
 
         // Handle block comments: /* ... */ or /** ... */
@@ -586,7 +586,7 @@ impl ParserEngine {
     fn extract_circuit_signature(&self, node: Node, source: &[u8]) -> Option<String> {
         let name = self.get_field_text(node, "id", source)?;
         let params = self.extract_params(node, source);
-        let return_type = self.get_field_text(node, "rtype", source).unwrap_or_default();
+        let return_type = self.get_field_text(node, "type", source).unwrap_or_default();
         Some(format!("circuit {}({}): {}", name, params, return_type))
     }
 
@@ -594,7 +594,7 @@ impl ParserEngine {
     fn extract_witness_signature(&self, node: Node, source: &[u8]) -> Option<String> {
         let name = self.get_field_text(node, "id", source)?;
         let params = self.extract_params(node, source);
-        let return_type = self.get_field_text(node, "rtype", source).unwrap_or_default();
+        let return_type = self.get_field_text(node, "type", source).unwrap_or_default();
         Some(format!("witness {}({}): {}", name, params, return_type))
     }
 
@@ -778,7 +778,7 @@ impl ParserEngine {
         let (call_node, func_name) = self.find_enclosing_call(node, source_bytes, point)?;
 
         // Count which parameter we're in (count commas before cursor)
-        let active_param = self.count_active_parameter(call_node, point, source_bytes);
+        let active_param = self.count_active_parameter(call_node, point);
 
         // Find the function definition
         let def_node = self.find_definition_node(&func_name, root, source_bytes)?;
@@ -887,7 +887,7 @@ impl ParserEngine {
     }
 
     /// Count which parameter the cursor is in (0-based).
-    fn count_active_parameter(&self, call_node: Node, cursor_point: tree_sitter::Point, source: &[u8]) -> u32 {
+    fn count_active_parameter(&self, call_node: Node, cursor_point: tree_sitter::Point) -> u32 {
         let mut comma_count = 0;
         let mut in_args = false;
 
@@ -917,34 +917,7 @@ impl ParserEngine {
             }
         }
 
-        // Also check inside nested argument nodes
-        let mut nested_cursor = call_node.walk();
-        for child in call_node.children(&mut nested_cursor) {
-            if child.kind() == "arguments" || child.kind() == "call_args" {
-                comma_count += self.count_commas_before_cursor(child, cursor_point, source);
-            }
-        }
-
         comma_count
-    }
-
-    /// Count commas before cursor position in an arguments node.
-    fn count_commas_before_cursor(&self, args_node: Node, cursor_point: tree_sitter::Point, _source: &[u8]) -> u32 {
-        let mut count = 0;
-        let mut cursor = args_node.walk();
-
-        for child in args_node.children(&mut cursor) {
-            let is_comma = child.kind() == ",";
-            let before_cursor = child.start_position().row < cursor_point.row
-                || (child.start_position().row == cursor_point.row
-                    && child.start_position().column < cursor_point.column);
-
-            if is_comma && before_cursor {
-                count += 1;
-            }
-        }
-
-        count
     }
 
     /// Build SignatureInfo from a definition node.
@@ -1456,19 +1429,11 @@ impl ParserEngine {
                 }
             }
 
-            // Variable bindings (let/const)
-            "let_binding" | "const_binding" => {
-                if let Some(name) = node.child_by_field_name("id") {
-                    let modifiers = if node.kind() == "const_binding" {
-                        vec![SemanticTokenModifier::Declaration, SemanticTokenModifier::Readonly]
-                    } else {
-                        vec![SemanticTokenModifier::Declaration]
-                    };
-                    tokens.push(SemanticToken {
-                        range: self.node_range(name),
-                        token_type: SemanticTokenType::Variable,
-                        modifiers,
-                    });
+            // Const bindings: `const <pattern> = <expr>;` (the grammar node is
+            // `const_stmt` with a `pattern` field; there is no `let` in Compact).
+            "const_stmt" => {
+                if let Some(pattern) = node.child_by_field_name("pattern") {
+                    self.collect_binding_id_tokens(pattern, tokens);
                 }
             }
 
@@ -1479,6 +1444,27 @@ impl ParserEngine {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.collect_semantic_tokens(child, source, tokens);
+        }
+    }
+
+    /// Emit a readonly variable-declaration token for every `id` bound by a
+    /// `pattern` node. Handles simple (`const x = ...`) and destructuring
+    /// (`const [a, b] = ...`, `const { f } = ...`) bindings.
+    fn collect_binding_id_tokens(&self, pattern: Node, tokens: &mut Vec<SemanticToken>) {
+        if pattern.kind() == "id" {
+            tokens.push(SemanticToken {
+                range: self.node_range(pattern),
+                token_type: SemanticTokenType::Variable,
+                modifiers: vec![
+                    SemanticTokenModifier::Declaration,
+                    SemanticTokenModifier::Readonly,
+                ],
+            });
+            return;
+        }
+        let mut cursor = pattern.walk();
+        for child in pattern.children(&mut cursor) {
+            self.collect_binding_id_tokens(child, tokens);
         }
     }
 
@@ -1941,6 +1927,62 @@ circuit main(): Field {
         assert!(info.is_some(), "Should find signature help for incomplete call");
         let info = info.unwrap();
         assert!(info.label.contains("add"), "Label should contain function name");
+    }
+
+    #[test]
+    fn test_signature_help_third_param() {
+        let mut parser = ParserEngine::new();
+        let source = r#"circuit add3(a: Field, b: Field, c: Field): Field {
+    return a + b + c;
+}
+
+circuit main(): Field {
+    return add3(1, 2, 3);
+}"#;
+        // Position after the second comma (line 5, col 21)
+        let info = parser.signature_help(source, 5, 21);
+        assert!(info.is_some(), "Should find signature help");
+        let info = info.unwrap();
+        assert_eq!(info.parameters.len(), 3, "Should have 3 parameters");
+        assert_eq!(info.active_parameter, 2, "Third parameter should be active");
+    }
+
+    #[test]
+    fn test_const_binding_semantic_token() {
+        let mut parser = ParserEngine::new();
+        let source = r#"circuit f(): Field {
+    const x = 1;
+    return x;
+}"#;
+        let tokens = parser.get_semantic_tokens(source);
+
+        // The `const` binding `x` must be reported as a readonly variable
+        // declaration. The grammar node is `const_stmt` (not `const_binding`),
+        // so this regresses if the match arm references the wrong node kind.
+        let var_decl = tokens.iter().find(|t| {
+            t.token_type == SemanticTokenType::Variable
+                && t.modifiers.contains(&SemanticTokenModifier::Declaration)
+                && t.modifiers.contains(&SemanticTokenModifier::Readonly)
+        });
+        assert!(
+            var_decl.is_some(),
+            "const binding should produce a readonly Variable declaration token"
+        );
+    }
+
+    #[test]
+    fn test_circuit_hover_includes_return_type() {
+        let mut parser = ParserEngine::new();
+        let source = "circuit add(a: Field, b: Field): Field { return a + b; }";
+        // Hover on "add" at position (0, 8).
+        let info = parser.hover_info(source, 0, 8).expect("hover on circuit");
+        // The return type comes from the `type` field; if the code reads a
+        // non-existent `rtype` field the signature ends with ": " (empty).
+        assert!(
+            info.content.contains("): Field"),
+            "circuit hover should include the return type, got: {}",
+            info.content
+        );
     }
 
     #[test]
