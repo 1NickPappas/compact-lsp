@@ -262,12 +262,25 @@ impl ParserEngine {
             }
         }
 
-        if comments.is_empty() {
-            None
-        } else {
+        if !comments.is_empty() {
             comments.reverse();
-            Some(comments.join("\n"))
+            return Some(comments.join("\n"));
         }
+
+        // The grammar only tokenizes `//` line comments, so block comments
+        // (`/* ... */`, `/** ... */`) never appear as sibling `comment` nodes.
+        // Fall back to scanning the raw source directly above the declaration.
+        let prefix = std::str::from_utf8(&source[..node.start_byte()]).ok()?;
+        let trimmed = prefix.trim_end();
+        if trimmed.ends_with("*/") {
+            let start = trimmed.rfind("/*")?;
+            let cleaned = self.clean_comment_text(&trimmed[start..]);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+
+        None
     }
 
     /// Clean comment text by removing markers and normalizing.

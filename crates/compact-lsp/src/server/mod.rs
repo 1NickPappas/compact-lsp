@@ -886,11 +886,9 @@ impl LanguageServer for CompactLanguageServer {
 
         // Stdlib struct types
         for st in stdlib::all_stdlib_structs() {
-            let label = if st.type_params.is_empty() {
-                st.name.to_string()
-            } else {
-                st.name.to_string()
-            };
+            // Show type params in the label (e.g. "Maybe<T>"); empty for
+            // non-generic structs. insert_text stays the bare name.
+            let label = format!("{}{}", st.name, st.type_params);
             items.push(CompletionItem {
                 label,
                 kind: Some(CompletionItemKind::STRUCT),
