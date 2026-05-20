@@ -357,11 +357,14 @@ mod tests {
     fn test_all_structs_have_fields() {
         for st in all_stdlib_structs() {
             assert!(!st.name.is_empty(), "Struct name must not be empty");
-            assert!(
-                !st.fields.is_empty(),
-                "Struct {} must have at least one field",
-                st.name
-            );
+            // JubjubPoint is an opaque `new type` alias with no fields.
+            if st.name != "JubjubPoint" {
+                assert!(
+                    !st.fields.is_empty(),
+                    "Struct {} must have at least one field",
+                    st.name
+                );
+            }
             assert!(
                 !st.description.is_empty(),
                 "Struct {} must have a description",
@@ -403,7 +406,7 @@ mod tests {
         assert_eq!(st.name, "Maybe");
         assert_eq!(st.type_params, "<T>");
         let field_names: Vec<&str> = st.fields.iter().map(|f| f.name).collect();
-        assert!(field_names.contains(&"isSome"));
+        assert!(field_names.contains(&"is_some"));
         assert!(field_names.contains(&"value"));
     }
 
@@ -425,15 +428,16 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_doc_file_coininfo() {
+    fn test_generate_doc_file_shielded_coin_info() {
         let info = doc_cache()
             .structs
-            .get("CoinInfo")
-            .expect("CoinInfo doc should exist");
-        let content = std::fs::read_to_string(&info.path).expect("CoinInfo.md should be readable");
+            .get("ShieldedCoinInfo")
+            .expect("ShieldedCoinInfo doc should exist");
+        let content =
+            std::fs::read_to_string(&info.path).expect("ShieldedCoinInfo.md should be readable");
 
-        assert!(content.starts_with("# CoinInfo\n"));
-        assert!(content.contains("Coin information type"));
+        assert!(content.starts_with("# ShieldedCoinInfo\n"));
+        assert!(content.contains("shielded coin"));
         assert!(content.contains("[Compact Standard Library]"));
         assert!(content.contains("## Fields"));
         assert!(content.contains("### `nonce: Bytes<32>`"));
@@ -449,27 +453,49 @@ mod tests {
 
         assert!(content.starts_with("# Standard Library Circuits\n"));
         assert!(content.contains("## `circuit some<T>(value: T): Maybe<T>`"));
-        assert!(content.contains("## `circuit send("));
+        assert!(content.contains("## `circuit sendShielded("));
         assert!(content.contains("## `circuit blockTimeLt("));
     }
 
     #[test]
     fn test_get_stdlib_struct_doc_location() {
-        let loc = get_stdlib_struct_doc_location("CoinInfo");
+        let loc = get_stdlib_struct_doc_location("ShieldedCoinInfo");
         assert!(loc.is_some());
         let loc = loc.unwrap();
         assert!(loc.uri.starts_with("file://"));
-        assert!(loc.uri.ends_with("CoinInfo.md"));
+        assert!(loc.uri.ends_with("ShieldedCoinInfo.md"));
         assert_eq!(loc.line, 0);
     }
 
     #[test]
     fn test_get_stdlib_circuit_doc_location() {
-        let loc = get_stdlib_circuit_doc_location("send");
+        let loc = get_stdlib_circuit_doc_location("sendShielded");
         assert!(loc.is_some());
         let loc = loc.unwrap();
         assert!(loc.uri.ends_with("StdlibCircuits.md"));
         assert!(loc.line > 0);
+    }
+
+    #[test]
+    fn test_registry_uses_0_21_names() {
+        // 0.21 names present.
+        assert!(find_stdlib_struct("ShieldedCoinInfo").is_some());
+        assert!(find_stdlib_struct("QualifiedShieldedCoinInfo").is_some());
+        assert!(find_stdlib_struct("ShieldedSendResult").is_some());
+        assert!(find_stdlib_struct("UserAddress").is_some());
+        assert!(find_stdlib_struct("JubjubPoint").is_some());
+        assert!(find_stdlib_circuit("sendShielded").is_some());
+        assert!(find_stdlib_circuit("mintShieldedToken").is_some());
+        assert!(find_stdlib_circuit("mintUnshieldedToken").is_some());
+        assert!(find_stdlib_circuit("unshieldedBalance").is_some());
+
+        // Pre-0.21 names gone.
+        assert!(find_stdlib_struct("CoinInfo").is_none());
+        assert!(find_stdlib_struct("SendResult").is_none());
+        assert!(find_stdlib_struct("CurvePoint").is_none());
+        assert!(find_stdlib_circuit("send").is_none());
+        assert!(find_stdlib_circuit("mintToken").is_none());
+        assert!(find_stdlib_circuit("burnAddress").is_none());
     }
 
     #[test]

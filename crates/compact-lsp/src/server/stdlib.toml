@@ -4,6 +4,10 @@
 # `import CompactStandardLibrary;`.  It is embedded at compile time
 # (include_str!) and parsed once on first access.
 #
+# Target: Compact language 0.21.x. Transcribed from the compiler's
+# standard-library.compact (signatures + snake_case field names) and the
+# CompactStandardLibrary API reference for compiler intrinsics.
+#
 # Reference: https://docs.midnight.network/develop/reference/compact/compact-std-library/exports
 
 # ── Maybe ────────────────────────────────────────────────────────────
@@ -15,14 +19,14 @@ description = "Optional container that may or may not hold a value of type T."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[structs.fields]]
-name = "isSome"
+name = "is_some"
 type_str = "Boolean"
 doc = "Whether the container holds a value."
 
 [[structs.fields]]
 name = "value"
 type_str = "T"
-doc = "The contained value (meaningful only when isSome is true)."
+doc = "The contained value (meaningful only when is_some is true)."
 
 # ── Either ───────────────────────────────────────────────────────────
 
@@ -33,37 +37,28 @@ description = "Union type that holds a value of type A (left) or type B (right).
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[structs.fields]]
-name = "isLeft"
+name = "is_left"
 type_str = "Boolean"
 doc = "Whether this holds the left variant."
 
 [[structs.fields]]
 name = "left"
 type_str = "A"
-doc = "The left variant value (meaningful only when isLeft is true)."
+doc = "The left variant value (meaningful only when is_left is true)."
 
 [[structs.fields]]
 name = "right"
 type_str = "B"
-doc = "The right variant value (meaningful only when isLeft is false)."
+doc = "The right variant value (meaningful only when is_left is false)."
 
-# ── CurvePoint ───────────────────────────────────────────────────────
+# ── JubjubPoint ──────────────────────────────────────────────────────
 
 [[structs]]
-name = "CurvePoint"
+name = "JubjubPoint"
 type_params = ""
-description = "A point on the elliptic curve used for cryptographic operations."
+description = "Opaque point on the embedded Jubjub elliptic curve (new type alias of Opaque<'JubjubPoint'>). Produced/consumed by the ec* circuits."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
-
-[[structs.fields]]
-name = "x"
-type_str = "Field"
-doc = "The x-coordinate of the curve point."
-
-[[structs.fields]]
-name = "y"
-type_str = "Field"
-doc = "The y-coordinate of the curve point."
+fields = []
 
 # ── MerkleTreeDigest ─────────────────────────────────────────────────
 
@@ -92,7 +87,7 @@ type_str = "MerkleTreeDigest"
 doc = "The sibling digest at this level of the tree."
 
 [[structs.fields]]
-name = "goesLeft"
+name = "goes_left"
 type_str = "Boolean"
 doc = "Whether this node is the left child at this level."
 
@@ -127,12 +122,12 @@ name = "bytes"
 type_str = "Bytes<32>"
 doc = "The raw 32-byte contract address."
 
-# ── CoinInfo ─────────────────────────────────────────────────────────
+# ── ShieldedCoinInfo ─────────────────────────────────────────────────
 
 [[structs]]
-name = "CoinInfo"
+name = "ShieldedCoinInfo"
 type_params = ""
-description = "Coin information type for token operations."
+description = "Description of a newly created shielded coin, used when outputting, spending, or receiving shielded coins originating in the current transaction."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[structs.fields]]
@@ -150,12 +145,12 @@ name = "value"
 type_str = "Uint<128>"
 doc = "The coin value (amount)."
 
-# ── QualifiedCoinInfo ────────────────────────────────────────────────
+# ── QualifiedShieldedCoinInfo ────────────────────────────────────────
 
 [[structs]]
-name = "QualifiedCoinInfo"
+name = "QualifiedShieldedCoinInfo"
 type_params = ""
-description = "Coin information with a Merkle tree index, representing a coin stored in the ledger."
+description = "Description of an existing shielded coin in the ledger, ready to be spent."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[structs.fields]]
@@ -174,7 +169,7 @@ type_str = "Uint<128>"
 doc = "The coin value (amount)."
 
 [[structs.fields]]
-name = "mtIndex"
+name = "mt_index"
 type_str = "Uint<64>"
 doc = "Index of the coin in the Merkle tree."
 
@@ -191,23 +186,36 @@ name = "bytes"
 type_str = "Bytes<32>"
 doc = "The raw 32-byte public key."
 
-# ── SendResult ───────────────────────────────────────────────────────
+# ── ShieldedSendResult ───────────────────────────────────────────────
 
 [[structs]]
-name = "SendResult"
+name = "ShieldedSendResult"
 type_params = ""
-description = "Result of a send operation, containing change and the sent coin."
+description = "Result of a shielded send operation, containing change and the sent coin."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[structs.fields]]
 name = "change"
-type_str = "Maybe<CoinInfo>"
+type_str = "Maybe<ShieldedCoinInfo>"
 doc = "Change coin returned to the sender, if any."
 
 [[structs.fields]]
 name = "sent"
-type_str = "CoinInfo"
+type_str = "ShieldedCoinInfo"
 doc = "The coin that was sent to the recipient."
+
+# ── UserAddress ──────────────────────────────────────────────────────
+
+[[structs]]
+name = "UserAddress"
+type_params = ""
+description = "Public key of a user, used as a recipient in unshielded token operations."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[structs.fields]]
+name = "bytes"
+type_str = "Bytes<32>"
+doc = "The raw 32-byte user address."
 
 # ═══════════════════════════════════════════════════════════════════════
 # Circuit Functions
@@ -304,31 +312,31 @@ doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-l
 [[circuits]]
 name = "ecAdd"
 type_params = ""
-signature = "ecAdd(a: CurvePoint, b: CurvePoint): CurvePoint"
+signature = "ecAdd(a: JubjubPoint, b: JubjubPoint): JubjubPoint"
 snippet = "ecAdd(${1:a}, ${2:b})"
-doc = "Elliptic curve point addition."
+doc = "Elliptic curve point addition (multiplicative notation)."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
 name = "ecMul"
 type_params = ""
-signature = "ecMul(a: CurvePoint, b: Field): CurvePoint"
+signature = "ecMul(a: JubjubPoint, b: Field): JubjubPoint"
 snippet = "ecMul(${1:a}, ${2:b})"
-doc = "Elliptic curve scalar multiplication."
+doc = "Elliptic curve scalar multiplication (multiplicative notation)."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
 name = "ecMulGenerator"
 type_params = ""
-signature = "ecMulGenerator(b: Field): CurvePoint"
+signature = "ecMulGenerator(b: Field): JubjubPoint"
 snippet = "ecMulGenerator(${1:b})"
-doc = "Multiply the generator point by a scalar."
+doc = "Multiply the primary group generator of the embedded curve by a scalar."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
 name = "hashToCurve"
 type_params = "<T>"
-signature = "hashToCurve<T>(value: T): CurvePoint"
+signature = "hashToCurve<T>(value: T): JubjubPoint"
 snippet = "hashToCurve(${1:value})"
 doc = "Map an arbitrary type to an elliptic curve point."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
@@ -364,65 +372,65 @@ doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-l
 [[circuits]]
 name = "tokenType"
 type_params = ""
-signature = "tokenType(domainSep: Bytes<32>, contract: ContractAddress): Bytes<32>"
-snippet = "tokenType(${1:domainSep}, ${2:contract})"
+signature = "tokenType(domain_sep: Bytes<32>, contractAddress: ContractAddress): Bytes<32>"
+snippet = "tokenType(${1:domain_sep}, ${2:contractAddress})"
 doc = "Generate a namespaced token type from a domain separator and contract address."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
+# ── Shielded token operations ────────────────────────────────────────
+
 [[circuits]]
-name = "mintToken"
+name = "mintShieldedToken"
 type_params = ""
-signature = "mintToken(domainSep: Bytes<32>, value: Uint<128>, nonce: Bytes<32>, recipient: Either<ZswapCoinPublicKey, ContractAddress>): CoinInfo"
-snippet = "mintToken(${1:domainSep}, ${2:value}, ${3:nonce}, ${4:recipient})"
-doc = "Create a new shielded coin with the given properties."
+signature = "mintShieldedToken(domain_sep: Bytes<32>, value: Uint<64>, nonce: Bytes<32>, recipient: Either<ZswapCoinPublicKey, ContractAddress>): ShieldedCoinInfo"
+snippet = "mintShieldedToken(${1:domain_sep}, ${2:value}, ${3:nonce}, ${4:recipient})"
+doc = "Create a new shielded coin minted by this contract and send it to the given recipient."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
 name = "evolveNonce"
 type_params = ""
-signature = "evolveNonce(index: Uint<64>, nonce: Bytes<32>): Bytes<32>"
+signature = "evolveNonce(index: Uint<128>, nonce: Bytes<32>): Bytes<32>"
 snippet = "evolveNonce(${1:index}, ${2:nonce})"
-doc = "Deterministically derive a new nonce from a counter index and existing nonce."
-doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
-
-# ── Coin transfer operations ─────────────────────────────────────────
-
-[[circuits]]
-name = "burnAddress"
-type_params = ""
-signature = "burnAddress(): Either<ZswapCoinPublicKey, ContractAddress>"
-snippet = "burnAddress()"
-doc = "Return the burn payment address (coins sent here are destroyed)."
+doc = "Deterministically derive a new ShieldedCoinInfo nonce from a counter index and existing nonce."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
-name = "receive"
+name = "shieldedBurnAddress"
 type_params = ""
-signature = "receive(coin: CoinInfo): []"
-snippet = "receive(${1:coin})"
-doc = "Receive a shielded coin with validation."
+signature = "shieldedBurnAddress(): Either<ZswapCoinPublicKey, ContractAddress>"
+snippet = "shieldedBurnAddress()"
+doc = "Return a payment address that guarantees any shielded coins sent to it are burned."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
-name = "send"
+name = "receiveShielded"
 type_params = ""
-signature = "send(input: QualifiedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>, value: Uint<128>): SendResult"
-snippet = "send(${1:input}, ${2:recipient}, ${3:value})"
-doc = "Send coins from a ledger coin. Returns a SendResult with optional change."
+signature = "receiveShielded(coin: ShieldedCoinInfo): []"
+snippet = "receiveShielded(${1:coin})"
+doc = "Receive a shielded coin, requiring it to be present as an output addressed to this contract."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
-name = "sendImmediate"
+name = "sendShielded"
 type_params = ""
-signature = "sendImmediate(input: CoinInfo, target: Either<ZswapCoinPublicKey, ContractAddress>, value: Uint<128>): SendResult"
-snippet = "sendImmediate(${1:input}, ${2:target}, ${3:value})"
-doc = "Send coins from a transaction-created coin. Returns a SendResult with optional change."
+signature = "sendShielded(input: QualifiedShieldedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>, value: Uint<128>): ShieldedSendResult"
+snippet = "sendShielded(${1:input}, ${2:recipient}, ${3:value})"
+doc = "Send value from a shielded coin owned by the contract to a recipient. Returns a ShieldedSendResult with optional change."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "sendImmediateShielded"
+type_params = ""
+signature = "sendImmediateShielded(input: ShieldedCoinInfo, target: Either<ZswapCoinPublicKey, ContractAddress>, value: Uint<128>): ShieldedSendResult"
+snippet = "sendImmediateShielded(${1:input}, ${2:target}, ${3:value})"
+doc = "Like sendShielded, but for coins created within the current transaction."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
 name = "mergeCoin"
 type_params = ""
-signature = "mergeCoin(a: QualifiedCoinInfo, b: QualifiedCoinInfo): CoinInfo"
+signature = "mergeCoin(a: QualifiedShieldedCoinInfo, b: QualifiedShieldedCoinInfo): ShieldedCoinInfo"
 snippet = "mergeCoin(${1:a}, ${2:b})"
 doc = "Combine two ledger coins of the same token type into one."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
@@ -430,7 +438,7 @@ doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-l
 [[circuits]]
 name = "mergeCoinImmediate"
 type_params = ""
-signature = "mergeCoinImmediate(a: QualifiedCoinInfo, b: CoinInfo): CoinInfo"
+signature = "mergeCoinImmediate(a: QualifiedShieldedCoinInfo, b: ShieldedCoinInfo): ShieldedCoinInfo"
 snippet = "mergeCoinImmediate(${1:a}, ${2:b})"
 doc = "Combine a ledger coin with a transaction-created coin of the same token type."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
@@ -448,17 +456,83 @@ doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-l
 [[circuits]]
 name = "createZswapInput"
 type_params = ""
-signature = "createZswapInput(coin: QualifiedCoinInfo): []"
+signature = "createZswapInput(coin: QualifiedShieldedCoinInfo): []"
 snippet = "createZswapInput(${1:coin})"
-doc = "Create a Zswap input notification for coin spending."
+doc = "Create a Zswap input notification for coin spending. Prefer sendShielded/sendImmediateShielded."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 [[circuits]]
 name = "createZswapOutput"
 type_params = ""
-signature = "createZswapOutput(coin: CoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>): []"
+signature = "createZswapOutput(coin: ShieldedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>): []"
 snippet = "createZswapOutput(${1:coin}, ${2:recipient})"
-doc = "Create a Zswap output notification for coin receiving."
+doc = "Create a Zswap output notification for coin receiving. Prefer sendShielded/receiveShielded."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+# ── Unshielded token operations ──────────────────────────────────────
+
+[[circuits]]
+name = "mintUnshieldedToken"
+type_params = ""
+signature = "mintUnshieldedToken(domainSep: Bytes<32>, amount: Uint<64>, recipient: Either<ContractAddress, UserAddress>): Bytes<32>"
+snippet = "mintUnshieldedToken(${1:domainSep}, ${2:amount}, ${3:recipient})"
+doc = "Create a new unshielded coin minted by this contract and send it to the given recipient. Returns the coin color."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "sendUnshielded"
+type_params = ""
+signature = "sendUnshielded(color: Bytes<32>, amount: Uint<128>, recipient: Either<ContractAddress, UserAddress>): []"
+snippet = "sendUnshielded(${1:color}, ${2:amount}, ${3:recipient})"
+doc = "Send the given amount of the given unshielded token to a recipient. No change is returned."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "receiveUnshielded"
+type_params = ""
+signature = "receiveUnshielded(color: Bytes<32>, amount: Uint<128>): []"
+snippet = "receiveUnshielded(${1:color}, ${2:amount})"
+doc = "Receive the given amount of the unshielded token identified by the color."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "unshieldedBalance"
+type_params = ""
+signature = "unshieldedBalance(color: Bytes<32>): Uint<128>"
+snippet = "unshieldedBalance(${1:color})"
+doc = "Return the contract's balance of the unshielded token of the given type (fixed at start of execution)."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "unshieldedBalanceLt"
+type_params = ""
+signature = "unshieldedBalanceLt(color: Bytes<32>, amount: Uint<128>): Boolean"
+snippet = "unshieldedBalanceLt(${1:color}, ${2:amount})"
+doc = "True if the unshielded balance for the given token type is less than the given amount."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "unshieldedBalanceGte"
+type_params = ""
+signature = "unshieldedBalanceGte(color: Bytes<32>, amount: Uint<128>): Boolean"
+snippet = "unshieldedBalanceGte(${1:color}, ${2:amount})"
+doc = "True if the unshielded balance for the given token type is greater than or equal to the given amount."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "unshieldedBalanceGt"
+type_params = ""
+signature = "unshieldedBalanceGt(color: Bytes<32>, amount: Uint<128>): Boolean"
+snippet = "unshieldedBalanceGt(${1:color}, ${2:amount})"
+doc = "True if the unshielded balance for the given token type is greater than the given amount."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "unshieldedBalanceLte"
+type_params = ""
+signature = "unshieldedBalanceLte(color: Bytes<32>, amount: Uint<128>): Boolean"
+snippet = "unshieldedBalanceLte(${1:color}, ${2:amount})"
+doc = "True if the unshielded balance for the given token type is less than or equal to the given amount."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 # ── Block time operations ────────────────────────────────────────────

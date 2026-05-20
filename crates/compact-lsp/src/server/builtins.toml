@@ -66,7 +66,7 @@ doc = "Overwrite the cell contents."
 
 [[types.methods]]
 name = "writeCoin"
-signature = "writeCoin(coin: CoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
+signature = "writeCoin(coin: ShieldedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
 snippet = "writeCoin(${1:coin}, ${2:recipient})"
 doc = "Write a coin value to the cell, transferring the coin to the recipient."
 
@@ -97,7 +97,7 @@ doc = "Insert a key with the value type's default value."
 
 [[types.methods]]
 name = "insertCoin"
-signature = "insertCoin(key: K, coin: CoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
+signature = "insertCoin(key: K, coin: ShieldedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
 snippet = "insertCoin(${1:key}, ${2:coin}, ${3:recipient})"
 doc = "Insert a key with a coin value, transferring the coin to the recipient."
 
@@ -152,7 +152,7 @@ doc = "Add an element to the set."
 
 [[types.methods]]
 name = "insertCoin"
-signature = "insertCoin(coin: CoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
+signature = "insertCoin(coin: ShieldedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
 snippet = "insertCoin(${1:coin}, ${2:recipient})"
 doc = "Insert a coin value into the set, transferring the coin to the recipient."
 
@@ -201,7 +201,7 @@ doc = "Prepend an element to the front of the list."
 
 [[types.methods]]
 name = "pushFrontCoin"
-signature = "pushFrontCoin(coin: CoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
+signature = "pushFrontCoin(coin: ShieldedCoinInfo, recipient: Either<ZswapCoinPublicKey, ContractAddress>)"
 snippet = "pushFrontCoin(${1:coin}, ${2:recipient})"
 doc = "Prepend a coin value to the front of the list, transferring the coin to the recipient."
 
@@ -365,10 +365,34 @@ snippet = "self()"
 doc = "Return the current contract's address."
 
 [[types.methods]]
-name = "mint"
-signature = "mint(domain_sep: Bytes<32>, amount: Uint<64>)"
-snippet = "mint(${1:domain_sep}, ${2:amount})"
+name = "balance"
+signature = "balance(token_type: Either<Bytes<32>, Bytes<32>>): Uint<128>"
+snippet = "balance(${1:token_type})"
+doc = "Return the contract's balance of the given unshielded token type (fixed at start of execution)."
+
+[[types.methods]]
+name = "balanceGreaterThan"
+signature = "balanceGreaterThan(token_type: Either<Bytes<32>, Bytes<32>>, amount: Uint<128>): Boolean"
+snippet = "balanceGreaterThan(${1:token_type}, ${2:amount})"
+doc = "Check whether the unshielded balance of the given token type is greater than the amount."
+
+[[types.methods]]
+name = "balanceLessThan"
+signature = "balanceLessThan(token_type: Either<Bytes<32>, Bytes<32>>, amount: Uint<128>): Boolean"
+snippet = "balanceLessThan(${1:token_type}, ${2:amount})"
+doc = "Check whether the unshielded balance of the given token type is less than the amount."
+
+[[types.methods]]
+name = "mintShielded"
+signature = "mintShielded(domain_sep: Bytes<32>, amount: Uint<64>)"
+snippet = "mintShielded(${1:domain_sep}, ${2:amount})"
 doc = "Create shielded coins with a contract-derived token type."
+
+[[types.methods]]
+name = "mintUnshielded"
+signature = "mintUnshielded(domain_sep: Bytes<32>, amount: Uint<64>)"
+snippet = "mintUnshielded(${1:domain_sep}, ${2:amount})"
+doc = "Create unshielded coins with a contract-derived token type."
 
 [[types.methods]]
 name = "blockTimeGreaterThan"
@@ -411,3 +435,21 @@ name = "claimZswapNullifier"
 signature = "claimZswapNullifier(nul: Bytes<32>)"
 snippet = "claimZswapNullifier(${1:nul})"
 doc = "Claim a Zswap nullifier."
+
+[[types.methods]]
+name = "claimUnshieldedCoinSpend"
+signature = "claimUnshieldedCoinSpend(token_type: Either<Bytes<32>, Bytes<32>>, address: Either<ContractAddress, UserAddress>, amount: Uint<128>)"
+snippet = "claimUnshieldedCoinSpend(${1:token_type}, ${2:address}, ${3:amount})"
+doc = "Claim spending of an unshielded coin in the containing transaction."
+
+[[types.methods]]
+name = "incUnshieldedInputs"
+signature = "incUnshieldedInputs(token_type: Either<Bytes<32>, Bytes<32>>, amount: Uint<128>)"
+snippet = "incUnshieldedInputs(${1:token_type}, ${2:amount})"
+doc = "Increase the recorded unshielded inputs for the given token type."
+
+[[types.methods]]
+name = "incUnshieldedOutputs"
+signature = "incUnshieldedOutputs(token_type: Either<Bytes<32>, Bytes<32>>, amount: Uint<128>)"
+snippet = "incUnshieldedOutputs(${1:token_type}, ${2:amount})"
+doc = "Increase the recorded unshielded outputs for the given token type."

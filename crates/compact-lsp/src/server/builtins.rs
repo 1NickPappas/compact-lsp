@@ -390,10 +390,15 @@ mod tests {
     #[test]
     fn test_methods_for_kernel() {
         let methods = methods_for_type("Kernel");
-        assert_eq!(methods.len(), 9);
+        assert_eq!(methods.len(), 16);
         let names: Vec<&str> = methods.iter().map(|m| m.name).collect();
         assert!(names.contains(&"self"));
-        assert!(names.contains(&"mint"));
+        assert!(names.contains(&"balance"));
+        assert!(names.contains(&"balanceGreaterThan"));
+        assert!(names.contains(&"balanceLessThan"));
+        assert!(names.contains(&"mintShielded"));
+        assert!(names.contains(&"mintUnshielded"));
+        assert!(!names.contains(&"mint"));
         assert!(names.contains(&"blockTimeGreaterThan"));
         assert!(names.contains(&"blockTimeLessThan"));
         assert!(names.contains(&"checkpoint"));
@@ -401,6 +406,9 @@ mod tests {
         assert!(names.contains(&"claimZswapCoinReceive"));
         assert!(names.contains(&"claimZswapCoinSpend"));
         assert!(names.contains(&"claimZswapNullifier"));
+        assert!(names.contains(&"claimUnshieldedCoinSpend"));
+        assert!(names.contains(&"incUnshieldedInputs"));
+        assert!(names.contains(&"incUnshieldedOutputs"));
     }
 
     #[test]
