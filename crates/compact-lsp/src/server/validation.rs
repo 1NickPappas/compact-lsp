@@ -16,13 +16,9 @@ pub fn is_keyword(name: &str) -> bool {
             | "if"
             | "else"
             | "for"
-            | "while"
-            | "let"
             | "const"
             | "true"
             | "false"
-            | "public"
-            | "private"
             | "pure"
             | "sealed"
             | "pragma"
@@ -38,6 +34,10 @@ pub fn is_keyword(name: &str) -> bool {
             | "as"
             | "of"
             | "prefix"
+            | "type"
+            | "new"
+            | "from"
+            | "slice"
     )
 }
 
@@ -52,25 +52,25 @@ pub fn is_builtin_type(name: &str) -> bool {
             | "Vector"
             | "Opaque"
             | "Counter"
-            | "Void"
             | "Map"
             | "Set"
             | "Cell"
-            | "Address"
             | "List"
             | "MerkleTree"
             | "HistoricMerkleTree"
+            | "Kernel"
             | "ContractAddress"
-            | "CoinInfo"
+            | "UserAddress"
+            | "ShieldedCoinInfo"
+            | "QualifiedShieldedCoinInfo"
+            | "ShieldedSendResult"
             | "MerkleTreeDigest"
             | "Maybe"
             | "Either"
-            | "CurvePoint"
+            | "JubjubPoint"
             | "MerkleTreePathEntry"
             | "MerkleTreePath"
-            | "QualifiedCoinInfo"
             | "ZswapCoinPublicKey"
-            | "SendResult"
     )
 }
 
@@ -104,9 +104,13 @@ mod tests {
         assert!(is_keyword("if"));
         assert!(is_keyword("else"));
         assert!(is_keyword("for"));
-        assert!(is_keyword("while"));
         assert!(is_keyword("const"));
         assert!(is_keyword("pure"));
+        // 0.21 keywords
+        assert!(is_keyword("type"));
+        assert!(is_keyword("new"));
+        assert!(is_keyword("from"));
+        assert!(is_keyword("slice"));
     }
 
     #[test]
@@ -116,6 +120,11 @@ mod tests {
         assert!(!is_keyword("Field"));
         assert!(!is_keyword("Boolean"));
         assert!(!is_keyword(""));
+        // Reserved-but-not-active words are not Compact keywords
+        assert!(!is_keyword("while"));
+        assert!(!is_keyword("let"));
+        assert!(!is_keyword("public"));
+        assert!(!is_keyword("private"));
     }
 
     #[test]
@@ -127,25 +136,25 @@ mod tests {
         assert!(is_builtin_type("Vector"));
         assert!(is_builtin_type("Opaque"));
         assert!(is_builtin_type("Counter"));
-        assert!(is_builtin_type("Void"));
         assert!(is_builtin_type("Map"));
         assert!(is_builtin_type("Set"));
         assert!(is_builtin_type("Cell"));
-        assert!(is_builtin_type("Address"));
         assert!(is_builtin_type("List"));
         assert!(is_builtin_type("MerkleTree"));
         assert!(is_builtin_type("HistoricMerkleTree"));
+        assert!(is_builtin_type("Kernel"));
         assert!(is_builtin_type("ContractAddress"));
-        assert!(is_builtin_type("CoinInfo"));
+        assert!(is_builtin_type("UserAddress"));
+        assert!(is_builtin_type("ShieldedCoinInfo"));
+        assert!(is_builtin_type("QualifiedShieldedCoinInfo"));
+        assert!(is_builtin_type("ShieldedSendResult"));
         assert!(is_builtin_type("MerkleTreeDigest"));
         assert!(is_builtin_type("Maybe"));
         assert!(is_builtin_type("Either"));
-        assert!(is_builtin_type("CurvePoint"));
+        assert!(is_builtin_type("JubjubPoint"));
         assert!(is_builtin_type("MerkleTreePathEntry"));
         assert!(is_builtin_type("MerkleTreePath"));
-        assert!(is_builtin_type("QualifiedCoinInfo"));
         assert!(is_builtin_type("ZswapCoinPublicKey"));
-        assert!(is_builtin_type("SendResult"));
     }
 
     #[test]
@@ -155,6 +164,13 @@ mod tests {
         assert!(!is_builtin_type("MyStruct"));
         assert!(!is_builtin_type("circuit"));
         assert!(!is_builtin_type(""));
+        // Pre-0.21 names that were renamed/removed
+        assert!(!is_builtin_type("CoinInfo"));
+        assert!(!is_builtin_type("QualifiedCoinInfo"));
+        assert!(!is_builtin_type("SendResult"));
+        assert!(!is_builtin_type("CurvePoint"));
+        assert!(!is_builtin_type("Void"));
+        assert!(!is_builtin_type("Address"));
     }
 
     #[test]

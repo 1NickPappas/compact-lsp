@@ -495,10 +495,9 @@ impl ParserEngine {
             "Bytes" => "**Bytes<N>**\n\nFixed-size byte array with `N` bytes.\n\n```compact\nconst hash: Bytes<32> = ...;\nconst data: Bytes<64> = ...;\n```",
             "Vector" => "**Vector<N, T>**\n\nFixed-size array of `N` elements of type `T`.\n\n```compact\nconst values: Vector<10, Field> = ...;\nconst flags: Vector<8, Boolean> = ...;\n```",
             "Opaque" => "**Opaque<\"name\">**\n\nOpaque type wrapper for external data.\n\n```compact\nconst external: Opaque<\"commitment\"> = ...;\n```",
-            "Map" => "**Map<K, V>**\n\nKey-value mapping for ledger state.\n\n```compact\nledger balances: Map<Address, Uint<64>>;\n```",
-            "Set" => "**Set<T>**\n\nSet collection for ledger state.\n\n```compact\nledger members: Set<Address>;\n```",
+            "Map" => "**Map<K, V>**\n\nKey-value mapping for ledger state.\n\n```compact\nledger balances: Map<Bytes<32>, Uint<64>>;\n```",
+            "Set" => "**Set<T>**\n\nSet collection for ledger state.\n\n```compact\nledger members: Set<Bytes<32>>;\n```",
             "Counter" => "**Counter**\n\nAtomic counter for ledger state.\n\n```compact\nledger nonce: Counter;\n```",
-            "Address" => "**Address**\n\nBlockchain address type.\n\n```compact\nconst recipient: Address = ...;\n```",
             "Cell" => "**Cell<T>**\n\nMutable cell for ledger state.\n\n```compact\nledger value: Cell<Field>;\n```",
             "List" => "**List<T>**\n\nOrdered list for ledger state. Supports prepend/pop from the front.\n\n```compact\nledger items: List<Field>;\n```",
             "MerkleTree" => "**MerkleTree<N, T>**\n\nMerkle tree for ledger state. Stores leaves and maintains a root hash.\n\n```compact\nledger tree: MerkleTree<32, Bytes<32>>;\n```",
@@ -1818,17 +1817,25 @@ fn is_builtin_type(name: &str) -> bool {
             | "Vector"
             | "Opaque"
             | "Counter"
-            | "Void"
             | "Map"
             | "Set"
             | "Cell"
-            | "Address"
             | "List"
             | "MerkleTree"
             | "HistoricMerkleTree"
+            | "Kernel"
             | "ContractAddress"
-            | "CoinInfo"
+            | "UserAddress"
+            | "ShieldedCoinInfo"
+            | "QualifiedShieldedCoinInfo"
+            | "ShieldedSendResult"
             | "MerkleTreeDigest"
+            | "Maybe"
+            | "Either"
+            | "JubjubPoint"
+            | "MerkleTreePathEntry"
+            | "MerkleTreePath"
+            | "ZswapCoinPublicKey"
     )
 }
 

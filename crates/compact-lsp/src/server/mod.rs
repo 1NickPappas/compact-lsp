@@ -834,6 +834,10 @@ impl LanguageServer for CompactLanguageServer {
             ("pure", "Pure function modifier"),
             ("sealed", "Sealed ledger modifier"),
             ("prefix", "Import prefix"),
+            ("type", "Type alias declaration"),
+            ("new", "Nominal type alias modifier"),
+            ("from", "Selective import source"),
+            ("slice", "Byte slice operation"),
         ];
 
         for (keyword, detail) in keywords {
@@ -865,8 +869,6 @@ impl LanguageServer for CompactLanguageServer {
                 "Historic Merkle tree with root history",
             ),
             ("Kernel", "Built-in kernel operations"),
-            ("Address", "Blockchain address type"),
-            ("Void", "Void return type"),
         ];
 
         for (type_name, detail) in types {
@@ -1362,7 +1364,7 @@ impl LanguageServer for CompactLanguageServer {
             }));
         }
 
-        // Stdlib circuit hover (e.g., hovering on "send")
+        // Stdlib circuit hover (e.g., hovering on "sendShielded")
         if let Some(circ) = stdlib::find_stdlib_circuit(&word) {
             let mut hover_text = format!(
                 "```compact\ncircuit {}\n```\n\n{}",
@@ -1383,7 +1385,7 @@ impl LanguageServer for CompactLanguageServer {
             }));
         }
 
-        // Stdlib struct hover (e.g., hovering on "CoinInfo", "Maybe")
+        // Stdlib struct hover (e.g., hovering on "ShieldedCoinInfo", "Maybe")
         let base_type = builtins::extract_base_type(&word);
         if let Some(st) = stdlib::find_stdlib_struct(base_type) {
             let mut hover_text = if st.type_params.is_empty() {
@@ -1538,7 +1540,7 @@ impl LanguageServer for CompactLanguageServer {
             })));
         }
 
-        // Stdlib struct type lookup (e.g., "CoinInfo", "Maybe<T>")
+        // Stdlib struct type lookup (e.g., "ShieldedCoinInfo", "Maybe<T>")
         if let Some(doc_loc) = stdlib::get_stdlib_struct_doc_location(base_type) {
             let target_uri = match Uri::from_str(&doc_loc.uri) {
                 Ok(u) => u,
@@ -1559,7 +1561,7 @@ impl LanguageServer for CompactLanguageServer {
             })));
         }
 
-        // Stdlib circuit function lookup (e.g., "send", "transientHash")
+        // Stdlib circuit function lookup (e.g., "sendShielded", "transientHash")
         if let Some(doc_loc) = stdlib::get_stdlib_circuit_doc_location(&word) {
             let target_uri = match Uri::from_str(&doc_loc.uri) {
                 Ok(u) => u,
@@ -1650,7 +1652,7 @@ impl LanguageServer for CompactLanguageServer {
         if let Some(circ) = stdlib::find_stdlib_circuit(&func_name) {
             let active_param =
                 utils::count_commas_before_cursor(&content, position.line, position.character);
-            // Build detail string from signature: "send(input: QualifiedCoinInfo, ...): SendResult" → "(input: QualifiedCoinInfo, ...): SendResult"
+            // Build detail string from signature: "sendShielded(input: QualifiedShieldedCoinInfo, ...): ShieldedSendResult" → "(input: QualifiedShieldedCoinInfo, ...): ShieldedSendResult"
             let detail = circ
                 .signature
                 .find('(')
