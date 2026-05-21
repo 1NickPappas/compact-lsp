@@ -81,15 +81,6 @@ impl ParserEngine {
                 let name = self.get_field_text(node, "id", source)?;
                 (name, SymbolKind::FUNCTION, Some("circuit".to_string()))
             }
-            // External circuit declaration: circuit name(...): Type;
-            "edecl" => {
-                let name = self.get_field_text(node, "id", source)?;
-                (
-                    name,
-                    SymbolKind::FUNCTION,
-                    Some("external circuit".to_string()),
-                )
-            }
             // Witness declaration: witness name(...): Type;
             "wdecl" => {
                 let name = self.get_field_text(node, "id", source)?;
@@ -109,6 +100,11 @@ impl ParserEngine {
             "enumdef" => {
                 let name = self.get_field_text(node, "name", source)?;
                 (name, SymbolKind::ENUM, None)
+            }
+            // Type alias: [export] [new] type Name [<…>] = Type;  (language 0.23)
+            "type_alias_declaration" => {
+                let name = self.get_field_text(node, "name", source)?;
+                (name, SymbolKind::INTERFACE, Some("type".to_string()))
             }
             // Module definition: module Name { ... }
             "mdefn" => {
@@ -529,16 +525,6 @@ impl ParserEngine {
                     range: Some(self.node_range(node)),
                 })
             }
-            "edecl" => {
-                let signature = self.extract_circuit_signature(node, source)?;
-                Some(HoverInfo {
-                    content: format!(
-                        "```compact\n{}\n```\n\nExternal circuit declaration{}",
-                        signature, doc_suffix
-                    ),
-                    range: Some(self.node_range(node)),
-                })
-            }
             "wdecl" => {
                 let signature = self.extract_witness_signature(node, source)?;
                 Some(HoverInfo {
@@ -680,7 +666,7 @@ impl ParserEngine {
         // Check if this node is a definition with matching name
         let def_name = match kind {
             // Circuit definitions use "function_name" node
-            "cdefn" | "edecl" | "wdecl" => self.get_function_name(node, source),
+            "cdefn" | "wdecl" => self.get_function_name(node, source),
             "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => {
                 self.get_field_text(node, "name", source)
             }
@@ -741,7 +727,7 @@ impl ParserEngine {
         if let Some(parent) = node.parent() {
             let parent_kind = parent.kind();
             match parent_kind {
-                "cdefn" | "edecl" | "wdecl" => {
+                "cdefn" | "wdecl" => {
                     if self.get_field_text(parent, "id", source_bytes).as_deref() == Some(&text) {
                         // We're on the definition itself
                         return Some(DefinitionLocation {
@@ -782,7 +768,7 @@ impl ParserEngine {
         let kind = node.kind();
 
         let name_node = match kind {
-            "cdefn" | "edecl" | "wdecl" => node.child_by_field_name("id"),
+            "cdefn" | "wdecl" => node.child_by_field_name("id"),
             "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => node.child_by_field_name("name"),
             _ => None,
         }?;
@@ -990,10 +976,6 @@ impl ParserEngine {
                 let name = self.get_function_name(def_node, source)?;
                 ("circuit", name, "Circuit function")
             }
-            "edecl" => {
-                let name = self.get_function_name(def_node, source)?;
-                ("circuit", name, "External circuit")
-            }
             "wdecl" => {
                 let name = self.get_function_name(def_node, source)?;
                 ("witness", name, "Witness function")
@@ -1025,7 +1007,7 @@ impl ParserEngine {
         })
     }
 
-    /// Get function name from a cdefn/edecl/wdecl node.
+    /// Get function name from a cdefn/wdecl node.
     fn get_function_name(&self, node: Node, source: &[u8]) -> Option<String> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1036,7 +1018,7 @@ impl ParserEngine {
         None
     }
 
-    /// Get return type from a cdefn/edecl/wdecl node.
+    /// Get return type from a cdefn/wdecl node.
     fn get_type_text(&self, node: Node, source: &[u8]) -> Option<String> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1092,7 +1074,7 @@ impl ParserEngine {
 
         // Extract any doc comments preceding the definition (for relevant node types)
         let doc_comment = match kind {
-            "cdefn" | "edecl" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" => self
+            "cdefn" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" => self
                 .extract_doc_comment(node, source)
                 .map(|doc| format!("\n\n---\n\n{}", doc))
                 .unwrap_or_default(),
@@ -1109,26 +1091,6 @@ impl ParserEngine {
                     let location = self.node_to_symbol_location(node);
                     let doc = format!(
                         "Circuit function\n\n```compact\ncircuit {}{}\n```{}",
-                        name, detail, doc_comment
-                    );
-                    symbols.push(CompletionSymbol {
-                        name,
-                        kind: CompletionSymbolKind::Function,
-                        detail: Some(detail),
-                        location: Some(location),
-                        documentation: Some(doc),
-                    });
-                }
-            }
-            // External circuit declarations
-            "edecl" => {
-                if let Some(name) = self.get_function_name(node, source) {
-                    let params = self.extract_params(node, source);
-                    let return_type = self.get_type_text(node, source).unwrap_or_default();
-                    let detail = format!("({}): {}", params, return_type);
-                    let location = self.node_to_symbol_location(node);
-                    let doc = format!(
-                        "External circuit\n\n```compact\ncircuit {}{}\n```{}",
                         name, detail, doc_comment
                     );
                     symbols.push(CompletionSymbol {
@@ -1351,7 +1313,7 @@ impl ParserEngine {
     fn collect_semantic_tokens(&self, node: Node, source: &[u8], tokens: &mut Vec<SemanticToken>) {
         match node.kind() {
             // Circuit/function definitions
-            "cdefn" | "edecl" | "wdecl" => {
+            "cdefn" | "wdecl" => {
                 // Get the function_name node which contains the actual name
                 if let Some(name_node) = node
                     .children(&mut node.walk())
@@ -1497,11 +1459,17 @@ impl ParserEngine {
                 }
             }
 
-            // Const bindings: `const <pattern> = <expr>;` (the grammar node is
-            // `const_stmt` with a `pattern` field; there is no `let` in Compact).
+            // Const bindings: `const <cbinding>, … ;` where each `cbinding`
+            // holds a `pattern` field (multi-binding `const a = 1, b = 2;`).
+            // There is no `let` in Compact.
             "const_stmt" => {
-                if let Some(pattern) = node.child_by_field_name("pattern") {
-                    self.collect_binding_id_tokens(pattern, tokens);
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "cbinding" {
+                        if let Some(pattern) = child.child_by_field_name("pattern") {
+                            self.collect_binding_id_tokens(pattern, tokens);
+                        }
+                    }
                 }
             }
 
@@ -1562,7 +1530,7 @@ impl ParserEngine {
 
         // Check for definition sites
         match kind {
-            "cdefn" | "edecl" | "wdecl" => {
+            "cdefn" | "wdecl" => {
                 // Check function_name child for circuit/witness definitions
                 if let Some(name_node) = node
                     .children(&mut node.walk())
@@ -2070,6 +2038,38 @@ circuit main(): Field {
             info.content.contains("): Field"),
             "circuit hover should include the return type, got: {}",
             info.content
+        );
+    }
+
+    #[test]
+    fn test_parses_language_0_23_syntax() {
+        let mut parser = ParserEngine::new();
+        // Constructs that only the 0.23-capable grammar parses: block comment,
+        // selective import, `new type` alias, single-quoted Opaque tag,
+        // multi-binding const with hex/octal literals, and slice<>.
+        let source = r#"/* block comment */
+import { Maybe } from CompactStandardLibrary;
+export new type Tag = Opaque<'mytag'>;
+export circuit demo(data: Bytes<32>): Bytes<16> {
+    const a = 0xFF, b = 0o17;
+    return slice<16>(data, 0);
+}"#;
+        let errors = parser.get_syntax_errors(source);
+        assert!(
+            errors.is_empty(),
+            "0.23 syntax should parse without errors, got: {:?}",
+            errors
+        );
+        // The circuit is still discoverable as a symbol.
+        let symbols = parser.get_completion_symbols(source);
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "demo" && s.kind == CompletionSymbolKind::Function));
+        // The `new type` alias appears in the document-symbol outline.
+        let doc_symbols = parser.document_symbols(source);
+        assert!(
+            doc_symbols.iter().any(|s| s.name == "Tag"),
+            "type alias should appear in the outline"
         );
     }
 

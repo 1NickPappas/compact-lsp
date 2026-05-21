@@ -36,6 +36,8 @@ The analysis layer, independent of the LSP protocol. Exposes three engines via `
 - **`FormatterEngine`** (`formatter.rs`) — wraps the external `format-compact` binary.
 - **`ParserEngine`** (`parser/mod.rs`, ~2700 lines) — wraps `tree-sitter-compact` (pulled from git). This is the heart of every AST-driven feature: document symbols, folding, hover, go-to-definition, signature help, completion symbols, import extraction, syntax errors, semantic tokens, and find-references. Operations take `&mut self` (the tree-sitter `Parser` is mutable).
 
+> **Temporary grammar pin (revisit):** `Cargo.toml` pins `tree-sitter-compact` to the unmerged branch **`feat/grammar-v0.30.0`** because it's the only grammar that parses language 0.23 syntax (`slice`, `new type` aliases, `{…} from` selective imports, block comments, hex/oct/bin literals, `$`-identifiers). **Switch back to `branch = "main"` once that branch merges upstream** — check `compact-tree-sitter` `main` vs `feat/grammar-v0.30.0` periodically. The parser was migrated for this grammar (no `edecl`; `const_stmt` wraps `cbinding`). Deferred follow-up: hover/go-to-definition for `type_alias_declaration` and resolution of `import_selection` selective imports.
+
 ### `crates/compact-lsp` (binary)
 
 `main.rs` sets up `tracing` (stderr) and runs the `tower-lsp` server over stdin/stdout. All logic lives in `server/`:

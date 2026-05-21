@@ -67,6 +67,10 @@ tempfile = "3"
 # TOML parsing for data-driven registries
 toml = "0.8"
 
-# Tree-sitter for parsing
+# Tree-sitter for parsing.
+# NOTE: temporarily pinned to the unmerged `feat/grammar-v0.30.0` branch, which
+# is the grammar that supports language 0.23 syntax (slice, type aliases,
+# selective imports, block comments, etc.). Switch back to `branch = "main"`
+# once that branch merges upstream. See crates/compact-lsp/CLAUDE.md.
 tree-sitter = "0.25"
-tree-sitter-compact = { git = "https://github.com/midnightntwrk/compact-tree-sitter", branch = "main" }
+tree-sitter-compact = { git = "https://github.com/midnightntwrk/compact-tree-sitter", branch = "feat/grammar-v0.30.0" }
