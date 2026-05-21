@@ -488,6 +488,8 @@ mod tests {
         assert!(find_stdlib_circuit("mintShieldedToken").is_some());
         assert!(find_stdlib_circuit("mintUnshieldedToken").is_some());
         assert!(find_stdlib_circuit("unshieldedBalance").is_some());
+        // Added in language 0.23.10x.
+        assert!(find_stdlib_circuit("keccak256").is_some());
 
         // Pre-0.21 names gone.
         assert!(find_stdlib_struct("CoinInfo").is_none());

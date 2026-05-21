@@ -4,9 +4,10 @@
 # `import CompactStandardLibrary;`.  It is embedded at compile time
 # (include_str!) and parsed once on first access.
 #
-# Target: Compact language 0.23.x. Transcribed from the compiler's
+# Target: Compact language 0.23.103. Transcribed from the compiler's
 # standard-library.compact (signatures + snake_case field names) and the
 # CompactStandardLibrary API reference for compiler intrinsics.
+# Note: keccak256 requires a 0.23.10x+ compiler (rejected by 0.23.0).
 #
 # Reference: https://docs.midnight.network/develop/reference/compact/compact-std-library/exports
 
@@ -305,6 +306,14 @@ type_params = ""
 signature = "upgradeFromTransient(x: Field): Bytes<32>"
 snippet = "upgradeFromTransient(${1:x})"
 doc = "Convert a transient field element back to a persistent output (Bytes<32>)."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "keccak256"
+type_params = "<T>"
+signature = "keccak256<T>(value: T): Bytes<32>"
+snippet = "keccak256(${1:value})"
+doc = "Hash the input with the Keccak-256 algorithm, returning the 32-byte digest. Requires a language 0.23.10x+ compiler."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
 
 # ── Elliptic curve operations ────────────────────────────────────────
