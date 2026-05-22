@@ -14,6 +14,7 @@ Completed:
 - ✅ **Pre-existing fixes** — block-comment doc extraction (`ac0080b`), repo reformat + `rust-toolchain.toml` pin to 1.91.1 (`9bd2151`, `8a9f1e3`), `redundant_closure` fix (`d872a1f`).
 - ✅ **Track A — 0.23-capable grammar** (`683627f`) — pinned `tree-sitter-compact` to `feat/grammar-v0.30.0`; migrated the parser (`const_stmt`→`cbinding`, removed `edecl`, type-alias in outline); 0.23 parse smoke test. **Temporary pin** — revert to `branch = "main"` once that branch merges upstream (see `CLAUDE.md`).
 - ✅ **Track B Phase 1** (`a23f9c8`) — `workspace/symbol` (filters `symbol_cache`), index caches on `did_open`, surface compiler/language version on startup.
+- ✅ **Track C fast wins** (`216d700`) — dropped `Cell` from type completion (not a writable type); consolidated the duplicated `is_builtin_type` into a single source in `compact-analyzer`.
 
 ## Background
 
@@ -58,8 +59,8 @@ Remaining:
 
 ## Track C — Smaller refinements
 
-- **[Update] `Cell` type completion** — `server/mod.rs` offers `Cell` as a type, but `Cell<T>` is **not** a valid ledger-field type (a single-value field is declared with the bare type, e.g. `ledger flag: Boolean;`, and *becomes* a Cell). Verified via the 0.23 compiler (`unbound identifier Cell`). Drop `Cell` from the type-completion/snippet list (keep its ledger-ADT methods in `builtins.toml`), or relabel it so it isn't suggested as a writable type.
-- **[Update] Consolidate duplicate `is_builtin_type`** — the same list exists in `crates/compact-lsp/src/server/validation.rs` and `crates/compact-analyzer/src/parser/mod.rs:1810`. They must be kept in lockstep (both were updated for 0.23); consider a single shared source to prevent future drift.
+- ✅ **`Cell` type completion** (`216d700`) — dropped `Cell`/`Cell<>` from the type-completion/snippet lists; it's not a writable type (a single-value field uses the bare type and *becomes* a Cell). Cell's ledger-ADT methods in `builtins.toml` are kept.
+- ✅ **Consolidate duplicate `is_builtin_type`** (`216d700`) — single source in `compact-analyzer` (`pub fn`, re-exported from `lib.rs`); `compact-lsp/src/server/validation.rs` re-exports it.
 - **[Revisit] `keccak256`** — once a 0.23.10x compiler is installable (`compact update`), re-run the probe to confirm and point `COMPACT_COMPILER` at it; until then the LSP is intentionally ahead of the released compiler on this one symbol.
 - **[Add] (optional) probe-compile dev check** — a small script/test that compiles a registry-coverage `.compact` contract with the detected compiler, to catch future stdlib drift automatically.
 
@@ -68,4 +69,4 @@ Remaining:
 ## Verification
 
 - Code gates (repo root, no `cd`): `cargo build`, `cargo test --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --all --check`.
-- **Track B/C (remaining)**: feature-specific manual checks in an editor; for `Cell`, confirm it no longer autocompletes as a type; for code actions, confirm the "fix up & format" action appears and rewrites the file.
+- **Track B/C (remaining)**: feature-specific manual checks in an editor; e.g. for code actions, confirm the "fix up & format" action appears and rewrites the file.
