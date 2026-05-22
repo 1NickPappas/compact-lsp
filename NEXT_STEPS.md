@@ -12,6 +12,8 @@ Completed:
 - ✅ **Parser node-kind correctness bugs** (`f062c71`) — `const_binding`→`const_stmt`, removed dead `let_binding`/`call_args` arms, fixed `rtype`→`type` return-type field; regression tests added.
 - ✅ **Stdlib / keyword accuracy → language 0.23.103** (`907d36e`, `676c505`, `5a74533`, `19d8e47`) — snake_case fields; `Coin*`→`Shielded*`; `CurvePoint`→`JubjubPoint`; unshielded-token family + `UserAddress`; Kernel `mintShielded`/`mintUnshielded` + `balance*`/`claimUnshieldedCoinSpend`/`incUnshielded*`; keyword list (`type`/`new`/`from`/`slice`, dropped `while`/`let`/`public`/`private`); dropped stale `Void`/`Address`; added `keccak256`. Verified by compiling a probe contract with compactc 0.23.0.
 - ✅ **Pre-existing fixes** — block-comment doc extraction (`ac0080b`), repo reformat + `rust-toolchain.toml` pin to 1.91.1 (`9bd2151`, `8a9f1e3`), `redundant_closure` fix (`d872a1f`).
+- ✅ **Track A — 0.23-capable grammar** (`683627f`) — pinned `tree-sitter-compact` to `feat/grammar-v0.30.0`; migrated the parser (`const_stmt`→`cbinding`, removed `edecl`, type-alias in outline); 0.23 parse smoke test. **Temporary pin** — revert to `branch = "main"` once that branch merges upstream (see `CLAUDE.md`).
+- ✅ **Track B Phase 1** (`a23f9c8`) — `workspace/symbol` (filters `symbol_cache`), index caches on `did_open`, surface compiler/language version on startup.
 
 ## Background
 
@@ -26,40 +28,31 @@ Completed:
   - `doc/api/CompactStandardLibrary/exports.md` — full public symbol set incl. compiler intrinsics
   - `doc/ledger-adt.mdx` — ledger ADT (Kernel/Cell/Counter/Set/Map/List/MerkleTree) methods
   - `CHANGELOG_compactc.md` — detailed per-version language/stdlib history
-- `compact-tree-sitter` — `grammar.js`, `src/node-types.json` (branch `main` vs `feat/grammar-v0.30.0`)
+- `compact-tree-sitter` — `grammar.js`, `src/node-types.json`. The LSP currently pins the `feat/grammar-v0.30.0` branch (0.23-capable); `main` is still the older line-comments-only grammar until the branch merges.
 
 ---
 
-## Track A — Grammar lags language 0.23 (top priority)
+## Track A — 0.23 grammar ✅ done (`683627f`)
 
-The LSP pins `compact-tree-sitter` `branch = "main"` (`Cargo.toml:72`), currently `6693aff`. That grammar is **line-comments-only** and has **none** of the 0.23 node types — verified absent in `src/node-types.json`: `slice_term`, `type_alias_declaration`, `import_selection`, `cbinding`, `assign_expr`, `array_literal`, `spread_element`, `bytes_literal`.
+The LSP now pins `compact-tree-sitter` `feat/grammar-v0.30.0` (`Cargo.toml:72`), which parses all 0.23 syntax (`slice`, `new type` aliases, selective imports, block comments, hex/oct/bin literals, `$`-identifiers, multi-binding `const`). Parser migrated (`const_stmt`→`cbinding`, `edecl` removed, type-alias added to the outline) with a parse smoke test.
 
-**Impact:** every parser-driven feature (semantic tokens, document symbols, hover, folding, signature help, references, rename) silently misbehaves on real 0.23 contracts that use:
-- `slice<n>(value, start)` (26 example files use it), `new type` aliases (9), `{a, b as c} from "…"` selective imports (15)
-- block comments `/* */`, hex/octal/binary literals, single-quoted strings + escapes, `$`-prefixed identifiers, `[expr]` index access, multi-binding `const a = 1, b = 2;`, generic `for`-loop bounds
-
-**Dependency:** a 0.23-capable grammar = `feat/grammar-v0.30.0`, which is **still unmerged** on `compact-tree-sitter`. Options:
-- (a) wait for upstream to merge it to `main`, then bump the `Cargo.toml` pin;
-- (b) pin the LSP to the `feat/grammar-v0.30.0` branch/rev now to support 0.23 syntax immediately;
-- (c) help land the merge upstream.
-
-**Parser migration** (`crates/compact-analyzer/src/parser/mod.rs`, plus `validation.rs`, completion in `server/mod.rs`), once on the new grammar:
-- **[Remove]** all `edecl` (external circuit) handling — the rule is deleted in the new grammar (parser references it ~10×).
-- **[Add]** node handling: `type_alias_declaration` (+ `type_name`), `import_selection`/`import_element`, `cbinding` (multi-binding const), `assign_expr` (assignment-as-expression), `assert_term`, `array_literal`/`bytes_literal`/`spread_element`, `slice_term`.
-- **[Update]** lexical features: block comments (folding + highlight), hex/oct/bin number literals, single-quoted strings, `$`-identifiers, `[expr]` indexing, generic `for`-bounds.
-- **[Update]** bump the `tree-sitter-compact` pin; re-run the `tree-sitter test` corpus and the LSP parser tests; re-run a probe compile.
+Remaining follow-ups:
+- **[Revert when merged]** when `feat/grammar-v0.30.0` lands on `compact-tree-sitter` `main`, switch the `Cargo.toml` pin back to `branch = "main"` and drop the `CLAUDE.md` temporary-pin note.
+- **[Add] deeper new-construct coverage** (deferred): hover + go-to-definition for `type_alias_declaration`; resolution of `import_selection`/`import_element` (selective imports) in imports extraction / goto / completion. Optional: semantic-token handling for `slice_term`, `assign_expr`, `assert_term`, array/bytes/spread literals.
 
 ---
 
 ## Track B — LSP feature roadmap (missing capabilities)
 
-Mostly `crates/compact-lsp/src/server/mod.rs`. Priority order:
+Mostly `crates/compact-lsp/src/server/mod.rs`.
 
-1. **[Add] Code actions** — quick fixes from compiler diagnostics (incl. `compact fixup` renamings). The only README-listed TODO; highest value.
-2. **[Add] Workspace symbols** (`workspace/symbol`) — reuse the existing `symbol_cache`.
-3. **[Add] Incremental workspace re-scan** on change — caches are populated only on `initialize`.
-4. **[Add]** Inlay hints (param names / inferred types), call hierarchy, range formatting (`format-compact` is whole-document only).
-5. **[Add] Surface the detected compiler/language version** (log + status) — now especially useful given the 0.23.0-vs-0.23.103 drift; lets users see when the LSP's registry is ahead of/behind their compiler.
+**Phase 1 ✅ done** (`a23f9c8`): workspace symbols (`workspace/symbol`, filters `symbol_cache`), cache indexing on `did_open` (was save/initial-scan only), and compiler/language version surfacing on startup (`DiagnosticEngine::version_info`).
+
+Remaining:
+1. **[Add] Code actions (Phase 2)** — primary: a "fix up & format file" source action via `fixup-compact` (whole-file). Quick-fixes from individual diagnostics are limited because compiler `Diagnostic`s carry **no `code`/structured data** (message text only) — would first need to enrich `Diagnostic.code`/`data` in `diagnostics.rs` for precise matching. The only README-listed TODO.
+2. **[Add] Inlay hints (Phase 3)** — parameter-name hints at call sites (reuse signature/param info); optionally inferred-type hints.
+3. **[Add] Range formatting (Phase 3)** — limited: `format-compact` is whole-document only, so either defer or implement a clearly-labeled whole-doc fallback.
+4. **[Add] Call hierarchy (Phase 3)** — `prepare_call_hierarchy`/`incoming_calls`/`outgoing_calls`; needs caller/callee graph analysis the parser doesn't expose yet (the biggest effort).
 
 ---
 
@@ -75,5 +68,4 @@ Mostly `crates/compact-lsp/src/server/mod.rs`. Priority order:
 ## Verification
 
 - Code gates (repo root, no `cd`): `cargo build`, `cargo test --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --all --check`.
-- **Track A**: validate against the `tree-sitter test` corpus and LSP parser tests after the grammar bump; open a 0.23 contract using `slice`/type aliases/selective imports/block comments and confirm semantic tokens, symbols, hover, and folding are correct.
-- **Track B/C**: feature-specific manual checks in an editor; for `Cell`, confirm it no longer autocompletes as a type.
+- **Track B/C (remaining)**: feature-specific manual checks in an editor; for `Cell`, confirm it no longer autocompletes as a type; for code actions, confirm the "fix up & format" action appears and rewrites the file.
