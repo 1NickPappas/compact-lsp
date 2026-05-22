@@ -42,37 +42,10 @@ pub fn is_keyword(name: &str) -> bool {
 }
 
 /// Check if a name is a built-in type.
-pub fn is_builtin_type(name: &str) -> bool {
-    matches!(
-        name,
-        "Field"
-            | "Boolean"
-            | "Uint"
-            | "Bytes"
-            | "Vector"
-            | "Opaque"
-            | "Counter"
-            | "Map"
-            | "Set"
-            | "Cell"
-            | "List"
-            | "MerkleTree"
-            | "HistoricMerkleTree"
-            | "Kernel"
-            | "ContractAddress"
-            | "UserAddress"
-            | "ShieldedCoinInfo"
-            | "QualifiedShieldedCoinInfo"
-            | "ShieldedSendResult"
-            | "MerkleTreeDigest"
-            | "Maybe"
-            | "Either"
-            | "JubjubPoint"
-            | "MerkleTreePathEntry"
-            | "MerkleTreePath"
-            | "ZswapCoinPublicKey"
-    )
-}
+///
+/// The canonical list lives in `compact-analyzer` (used by the parser for
+/// semantic-token highlighting); re-exported here so the LSP shares one source.
+pub use compact_analyzer::is_builtin_type;
 
 /// Check if a name is a valid Compact identifier.
 pub fn is_valid_identifier(name: &str) -> bool {

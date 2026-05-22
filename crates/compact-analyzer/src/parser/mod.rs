@@ -1775,7 +1775,7 @@ impl ParserEngine {
 }
 
 /// Check if a type name is a Compact built-in type.
-fn is_builtin_type(name: &str) -> bool {
+pub fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
         "Field"

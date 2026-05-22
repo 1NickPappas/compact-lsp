@@ -917,7 +917,6 @@ impl LanguageServer for CompactLanguageServer {
             ("Counter", "Atomic counter for ledger state"),
             ("Map", "Key-value mapping for ledger state"),
             ("Set", "Set collection for ledger state"),
-            ("Cell", "Mutable cell for ledger state"),
             ("List", "Ordered list for ledger state"),
             ("MerkleTree", "Merkle tree for ledger state"),
             (
@@ -961,7 +960,6 @@ impl LanguageServer for CompactLanguageServer {
                 "Map (e.g., Map<Address, Uint<64>>)",
             ),
             ("Set<>", "Set<${1:T}>", "Set (e.g., Set<Address>)"),
-            ("Cell<>", "Cell<${1:T}>", "Cell (e.g., Cell<Field>)"),
             ("List<>", "List<${1:T}>", "List (e.g., List<Field>)"),
             (
                 "MerkleTree<>",
