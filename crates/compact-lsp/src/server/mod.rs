@@ -22,7 +22,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use compact_analyzer::{CompletionSymbol, DiagnosticEngine, FormatterEngine, ParserEngine};
+use compact_analyzer::{
+    CompletionSymbol, CompletionSymbolKind, DiagnosticEngine, FormatterEngine, ParserEngine,
+    SymbolLocation,
+};
 use dashmap::DashMap;
 use lsp_types::*;
 use ropey::Rope;
@@ -66,6 +69,37 @@ pub struct CompactLanguageServer {
 
     /// Reverse dependency map for cross-file error propagation.
     reverse_dependencies: Arc<DashMap<String, Vec<String>>>,
+}
+
+/// Map a parser symbol kind to the LSP `SymbolKind` used for outline/workspace symbols.
+fn completion_kind_to_symbol_kind(kind: CompletionSymbolKind) -> SymbolKind {
+    match kind {
+        CompletionSymbolKind::Function => SymbolKind::FUNCTION,
+        CompletionSymbolKind::Struct => SymbolKind::STRUCT,
+        CompletionSymbolKind::Enum => SymbolKind::ENUM,
+        CompletionSymbolKind::Variable => SymbolKind::VARIABLE,
+        CompletionSymbolKind::Module => SymbolKind::MODULE,
+    }
+}
+
+/// Convert a parser `SymbolLocation` (0-based line/char) to an LSP `Range`.
+fn symbol_location_to_range(loc: &SymbolLocation) -> Range {
+    Range {
+        start: Position {
+            line: loc.start_line,
+            character: loc.start_char,
+        },
+        end: Position {
+            line: loc.end_line,
+            character: loc.end_char,
+        },
+    }
+}
+
+/// Whether a symbol name matches a workspace-symbol query (case-insensitive
+/// substring; an empty query matches everything). `query` must be lowercased.
+fn symbol_matches_query(name: &str, query: &str) -> bool {
+    query.is_empty() || name.to_lowercase().contains(query)
 }
 
 impl CompactLanguageServer {
@@ -516,6 +550,7 @@ impl LanguageServer for CompactLanguageServer {
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -568,9 +603,25 @@ impl LanguageServer for CompactLanguageServer {
 
     async fn initialized(&self, _params: InitializedParams) {
         tracing::info!("Server initialized - handshake complete");
+
+        // Surface the detected compiler/language version so registry-vs-compiler
+        // drift (e.g. the LSP registry being ahead of the installed compiler) is
+        // visible in the logs.
+        let version_msg = match self.diagnostic_engine.version_info() {
+            Some((compiler, language)) if !language.is_empty() => {
+                format!("Compact compiler {compiler} (language {language})")
+            }
+            Some((compiler, _)) => format!("Compact compiler {compiler}"),
+            None => "Compact compiler version unavailable".to_string(),
+        };
+        tracing::info!("{version_msg}");
+
         self.scan_workspace().await;
         self.client
-            .log_message(MessageType::INFO, "Compact LSP server ready")
+            .log_message(
+                MessageType::INFO,
+                format!("Compact LSP server ready — {version_msg}"),
+            )
             .await;
     }
 
@@ -585,12 +636,17 @@ impl LanguageServer for CompactLanguageServer {
 
         let rope = Rope::from_str(&params.text_document.text);
         self.documents.insert(
-            uri,
+            uri.clone(),
             Document {
                 content: rope,
                 version: params.text_document.version,
             },
         );
+
+        // Index the opened file immediately so it's searchable via workspace
+        // symbols and usable for cross-file features even before it's saved.
+        self.update_symbol_cache(&uri, &params.text_document.text);
+        self.update_reverse_dependencies(&uri, &params.text_document.text);
 
         self.publish_diagnostics(params.text_document.uri).await;
     }
@@ -1260,6 +1316,43 @@ impl LanguageServer for CompactLanguageServer {
         };
 
         Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<WorkspaceSymbolResponse>> {
+        let query = params.query.to_lowercase();
+        let mut items = Vec::new();
+
+        for entry in self.symbol_cache.iter() {
+            let uri = match entry.key().parse::<Uri>() {
+                Ok(uri) => uri,
+                Err(_) => continue,
+            };
+            for sym in entry.value() {
+                let Some(location) = &sym.location else {
+                    continue;
+                };
+                if !symbol_matches_query(&sym.name, &query) {
+                    continue;
+                }
+                #[allow(deprecated)]
+                items.push(SymbolInformation {
+                    name: sym.name.clone(),
+                    kind: completion_kind_to_symbol_kind(sym.kind),
+                    tags: None,
+                    deprecated: None,
+                    location: Location {
+                        uri: uri.clone(),
+                        range: symbol_location_to_range(location),
+                    },
+                    container_name: None,
+                });
+            }
+        }
+
+        Ok(Some(WorkspaceSymbolResponse::Flat(items)))
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
@@ -1944,5 +2037,109 @@ impl LanguageServer for CompactLanguageServer {
             document_changes: None,
             change_annotations: None,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sym(name: &str, kind: CompletionSymbolKind) -> CompletionSymbol {
+        CompletionSymbol {
+            name: name.to_string(),
+            kind,
+            detail: None,
+            location: Some(SymbolLocation {
+                start_line: 1,
+                start_char: 2,
+                end_line: 1,
+                end_char: 2 + name.len() as u32,
+            }),
+            documentation: None,
+        }
+    }
+
+    #[test]
+    fn test_completion_kind_to_symbol_kind() {
+        assert_eq!(
+            completion_kind_to_symbol_kind(CompletionSymbolKind::Function),
+            SymbolKind::FUNCTION
+        );
+        assert_eq!(
+            completion_kind_to_symbol_kind(CompletionSymbolKind::Struct),
+            SymbolKind::STRUCT
+        );
+        assert_eq!(
+            completion_kind_to_symbol_kind(CompletionSymbolKind::Enum),
+            SymbolKind::ENUM
+        );
+        assert_eq!(
+            completion_kind_to_symbol_kind(CompletionSymbolKind::Variable),
+            SymbolKind::VARIABLE
+        );
+        assert_eq!(
+            completion_kind_to_symbol_kind(CompletionSymbolKind::Module),
+            SymbolKind::MODULE
+        );
+    }
+
+    #[test]
+    fn test_symbol_location_to_range() {
+        let range = symbol_location_to_range(&SymbolLocation {
+            start_line: 3,
+            start_char: 4,
+            end_line: 3,
+            end_char: 9,
+        });
+        assert_eq!(
+            range.start,
+            Position {
+                line: 3,
+                character: 4
+            }
+        );
+        assert_eq!(
+            range.end,
+            Position {
+                line: 3,
+                character: 9
+            }
+        );
+    }
+
+    #[test]
+    fn test_symbol_matches_query() {
+        assert!(symbol_matches_query("transferTokens", "")); // empty query matches all
+        assert!(symbol_matches_query("transferTokens", "transfer"));
+        assert!(symbol_matches_query("transferTokens", "tokens")); // case-insensitive substring
+        assert!(!symbol_matches_query("transferTokens", "withdraw"));
+    }
+
+    #[test]
+    fn test_workspace_symbol_filter_and_map() {
+        let symbols = [
+            sym("addFunds", CompletionSymbolKind::Function),
+            sym("Point", CompletionSymbolKind::Struct),
+            sym("Color", CompletionSymbolKind::Enum),
+        ];
+
+        // Replicates the handler's per-symbol filter + map for query "add".
+        let mapped: Vec<_> = symbols
+            .iter()
+            .filter(|s| symbol_matches_query(&s.name, "add"))
+            .filter_map(|s| {
+                s.location.as_ref().map(|loc| {
+                    (
+                        s.name.clone(),
+                        completion_kind_to_symbol_kind(s.kind),
+                        symbol_location_to_range(loc),
+                    )
+                })
+            })
+            .collect();
+
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].0, "addFunds");
+        assert_eq!(mapped[0].1, SymbolKind::FUNCTION);
     }
 }

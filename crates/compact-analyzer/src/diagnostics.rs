@@ -79,6 +79,23 @@ impl DiagnosticEngine {
         self.compiler_path.is_some()
     }
 
+    /// Detect the compiler and language versions by invoking the compiler.
+    /// Returns `(compiler_version, language_version)` when available.
+    pub fn version_info(&self) -> Option<(String, String)> {
+        let path = self.compiler_path.as_ref()?;
+        let run = |flag: &str| {
+            std::process::Command::new(path)
+                .arg(flag)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        };
+        let compiler = run("--version")?;
+        let language = run("--language-version").unwrap_or_default();
+        Some((compiler, language))
+    }
+
     /// Run diagnostics on a file and return LSP Diagnostic objects.
     ///
     /// # How it works
