@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo clippy *)",
+      "Bash(grep -nE '^#{1,4} |circuit |\\\\\\): |\\\\bself\\\\\\(\\\\\\)|increment|decrement|insert|lookup|member|read\\\\\\(|write\\\\\\(|push|pop|head|length|size|isEmpty|resetToDefault|checkRoot|insertHash|balance|claim|incUnshielded|mint|blockTime|checkpoint' /Users/nick.pappas/Documents/midnight/lsp/official_compact/doc/ledger-adt.mdx)"
+    ]
+  }
+}
