@@ -34,6 +34,33 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
+  compiler-probe:
+    name: Compiler probe (toolchain 0.31.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # The registry probe tests skip themselves when no compiler is found.
+      # Install the mainnet toolchain so they actually run and catch
+      # registry-vs-compiler drift.
+      - name: Install Compact devtools and toolchain 0.31.1
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/compact" update 0.31.1
+          "$HOME/.local/bin/compact" compile --version
+          "$HOME/.local/bin/compact" compile --language-version
+
+      - name: Probe registry against the detected compiler
+        run: cargo test -p compact-analyzer probe -- --nocapture
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

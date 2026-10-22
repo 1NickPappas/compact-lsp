@@ -127,7 +127,9 @@ The fallback (remove `keccak256` outright) was not needed.
 ### Step 8 — CI and gates ✅ done
 - [x] `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
       `cargo build`, `cargo test` all pass (126 tests).
-- [ ] Optional CI job that pins toolchain 0.31.1 (probe tests already skip gracefully when absent).
+- [x] Added a `compiler-probe` CI job that installs devtools + toolchain 0.31.1 and runs the probe
+tests (`cargo test -p compact-analyzer probe`). The main `check` job stays compiler-free and fast;
+the probe tests skip there when no compiler is present.
 
 ### Step 9 — Land
 - [ ] Merge `migrate/0.31.1` → `dev`; update `CHANGELOG.md`.

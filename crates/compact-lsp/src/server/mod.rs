@@ -142,6 +142,88 @@ fn stdlib_completion_items(language: Option<LanguageVersion>) -> Vec<CompletionI
     items
 }
 
+/// Markdown hover for a standard-library circuit, gated by language version.
+fn stdlib_circuit_hover_text(name: &str, language: Option<LanguageVersion>) -> Option<String> {
+    let circ = stdlib::find_stdlib_circuit_for(name, language)?;
+    let mut text = format!(
+        "```compact\ncircuit {}\n```\n\n{}",
+        circ.signature, circ.doc
+    );
+    if !circ.doc_url.is_empty() {
+        text.push_str(&format!(
+            "\n\n> [Compact Standard Library]({})",
+            circ.doc_url
+        ));
+    }
+    Some(text)
+}
+
+/// Markdown hover for a standard-library struct, gated by language version.
+fn stdlib_struct_hover_text(name: &str, language: Option<LanguageVersion>) -> Option<String> {
+    let st = stdlib::find_stdlib_struct_for(name, language)?;
+    let mut text = if st.type_params.is_empty() {
+        format!("**{}**\n\n{}\n\n", st.name, st.description)
+    } else {
+        format!(
+            "**{}{}**\n\n{}\n\n",
+            st.name, st.type_params, st.description
+        )
+    };
+    text.push_str("**Fields:**\n");
+    for field in &st.fields {
+        text.push_str(&format!(
+            "- `{}: {}` — {}\n",
+            field.name, field.type_str, field.doc
+        ));
+    }
+    if !st.doc_url.is_empty() {
+        text.push_str(&format!("\n> [Compact Standard Library]({})", st.doc_url));
+    }
+    Some(text)
+}
+
+/// Signature help for a standard-library circuit, gated by language version.
+fn stdlib_signature_help(
+    func_name: &str,
+    active_param: u32,
+    language: Option<LanguageVersion>,
+) -> Option<SignatureHelp> {
+    let circ = stdlib::find_stdlib_circuit_for(func_name, language)?;
+
+    // Build detail from the signature: "sendShielded(input: …, …): ShieldedSendResult"
+    // -> "(input: …, …): ShieldedSendResult".
+    let detail = circ
+        .signature
+        .find('(')
+        .map(|i| &circ.signature[i..])
+        .unwrap_or(circ.signature);
+    let params = utils::parse_params_from_detail(detail);
+
+    let parameters: Vec<ParameterInformation> = params
+        .iter()
+        .map(|p| ParameterInformation {
+            label: ParameterLabel::Simple(p.clone()),
+            documentation: None,
+        })
+        .collect();
+
+    let signature = SignatureInformation {
+        label: format!("circuit {}", circ.signature),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: circ.doc.to_string(),
+        })),
+        parameters: Some(parameters),
+        active_parameter: Some(active_param),
+    };
+
+    Some(SignatureHelp {
+        signatures: vec![signature],
+        active_signature: Some(0),
+        active_parameter: Some(active_param),
+    })
+}
+
 impl CompactLanguageServer {
     /// Create a new language server instance.
     pub fn new(client: Client) -> Self {
@@ -1492,21 +1574,11 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Stdlib circuit hover (e.g., hovering on "sendShielded")
-        if let Some(circ) = stdlib::find_stdlib_circuit_for(&word, self.language_version) {
-            let mut hover_text = format!(
-                "```compact\ncircuit {}\n```\n\n{}",
-                circ.signature, circ.doc
-            );
-            if !circ.doc_url.is_empty() {
-                hover_text.push_str(&format!(
-                    "\n\n> [Compact Standard Library]({})",
-                    circ.doc_url
-                ));
-            }
+        if let Some(value) = stdlib_circuit_hover_text(&word, self.language_version) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: hover_text,
+                    value,
                 }),
                 range: None,
             }));
@@ -1514,29 +1586,11 @@ impl LanguageServer for CompactLanguageServer {
 
         // Stdlib struct hover (e.g., hovering on "ShieldedCoinInfo", "Maybe")
         let base_type = builtins::extract_base_type(&word);
-        if let Some(st) = stdlib::find_stdlib_struct_for(base_type, self.language_version) {
-            let mut hover_text = if st.type_params.is_empty() {
-                format!("**{}**\n\n{}\n\n", st.name, st.description)
-            } else {
-                format!(
-                    "**{}{}**\n\n{}\n\n",
-                    st.name, st.type_params, st.description
-                )
-            };
-            hover_text.push_str("**Fields:**\n");
-            for field in &st.fields {
-                hover_text.push_str(&format!(
-                    "- `{}: {}` — {}\n",
-                    field.name, field.type_str, field.doc
-                ));
-            }
-            if !st.doc_url.is_empty() {
-                hover_text.push_str(&format!("\n> [Compact Standard Library]({})", st.doc_url));
-            }
+        if let Some(value) = stdlib_struct_hover_text(base_type, self.language_version) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: hover_text,
+                    value,
                 }),
                 range: None,
             }));
@@ -1776,41 +1830,10 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Stdlib circuit function signature help
-        if let Some(circ) = stdlib::find_stdlib_circuit_for(&func_name, self.language_version) {
-            let active_param =
-                utils::count_commas_before_cursor(&content, position.line, position.character);
-            // Build detail string from signature: "sendShielded(input: QualifiedShieldedCoinInfo, ...): ShieldedSendResult" → "(input: QualifiedShieldedCoinInfo, ...): ShieldedSendResult"
-            let detail = circ
-                .signature
-                .find('(')
-                .map(|i| &circ.signature[i..])
-                .unwrap_or(circ.signature);
-            let params = utils::parse_params_from_detail(detail);
-
-            let parameters: Vec<ParameterInformation> = params
-                .iter()
-                .map(|p| ParameterInformation {
-                    label: ParameterLabel::Simple(p.clone()),
-                    documentation: None,
-                })
-                .collect();
-
-            let label = format!("circuit {}", circ.signature);
-            let signature = SignatureInformation {
-                label,
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: circ.doc.to_string(),
-                })),
-                parameters: Some(parameters),
-                active_parameter: Some(active_param),
-            };
-
-            return Ok(Some(SignatureHelp {
-                signatures: vec![signature],
-                active_signature: Some(0),
-                active_parameter: Some(active_param),
-            }));
+        let active_param =
+            utils::count_commas_before_cursor(&content, position.line, position.character);
+        if let Some(help) = stdlib_signature_help(&func_name, active_param, self.language_version) {
+            return Ok(Some(help));
         }
 
         Ok(None)
@@ -2147,6 +2170,25 @@ mod tests {
         assert!(symbol_matches_query("transferTokens", "transfer"));
         assert!(symbol_matches_query("transferTokens", "tokens")); // case-insensitive substring
         assert!(!symbol_matches_query("transferTokens", "withdraw"));
+    }
+
+    #[test]
+    fn test_stdlib_hover_and_signature_help_gate_keccak() {
+        let mainnet = Some(LanguageVersion::new(0, 23, 0));
+        let newer = Some(LanguageVersion::new(0, 23, 103));
+
+        // Gated symbol: hidden on the mainnet compiler, shown elsewhere.
+        assert!(stdlib_circuit_hover_text("keccak256", mainnet).is_none());
+        assert!(stdlib_signature_help("keccak256", 0, mainnet).is_none());
+        assert!(stdlib_circuit_hover_text("keccak256", newer).is_some());
+        assert!(stdlib_signature_help("keccak256", 0, newer).is_some());
+        // Unknown compiler -> gating disabled.
+        assert!(stdlib_circuit_hover_text("keccak256", None).is_some());
+
+        // Stable circuit and struct remain available on the mainnet compiler.
+        assert!(stdlib_circuit_hover_text("persistentHash", mainnet).is_some());
+        assert!(stdlib_struct_hover_text("Maybe", mainnet).is_some());
+        assert!(stdlib_struct_hover_text("Nope", mainnet).is_none());
     }
 
     #[test]
