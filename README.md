@@ -103,6 +103,10 @@ cargo test
 GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` job that installs toolchain
 0.31.1 and runs the registry probe tests (which skip themselves when no compiler is present).
 
+- **Releasing** — see [`RELEASING.md`](./RELEASING.md); cut a release with `scripts/release.sh`.
+- **Upstream tracking** — see [`UPSTREAM_RELEASES.md`](./UPSTREAM_RELEASES.md); the weekly
+  `upstream-watch` workflow files an issue when a newer Compact toolchain ships.
+
 ## Related Projects
 
 - [compact.vim](https://github.com/1NickPappas/compact.vim) - Vim/Neovim syntax highlighting

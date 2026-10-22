@@ -1,0 +1,25 @@
+name: Upstream watch
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    name: Check for a newer Compact toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Files an issue when the latest `compactc-*` release on
+      # midnightntwrk/compact is newer than .github/upstream-known.txt.
+      - name: Check upstream releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/check-upstream.sh --ci
