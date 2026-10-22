@@ -8,7 +8,9 @@ This project extends the Midnight Network with additional developer tooling.
 
 > ⚠️ **Note:** This is an experimental project developed in my personal free time for educational purposes — primarily to learn how Language Server Protocol implementations work. While functional, it is not officially supported. Feedback and contributions are welcome!
 
-Language Server Protocol implementation for the [Compact](https://docs.midnight.network/develop/reference/compact/lang-ref) smart contract language (Midnight network).
+Language Server Protocol implementation for the [Compact](https://docs.midnight.network/compact/reference/compact-reference) smart contract language (Midnight network).
+
+Targets **Compact toolchain 0.31.1 (language 0.23.0)** — the compiler pinned by Midnight Mainnet, Preprod, and Preview.
 
 ## Features
 
@@ -26,6 +28,7 @@ Language Server Protocol implementation for the [Compact](https://docs.midnight.
 | **Formatting** | Code formatting via `format-compact` |
 | **Folding Ranges** | Code folding for blocks and functions |
 | **Cross-file Errors** | Errors propagate to dependent files on save |
+| **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
 
 ### Cross-Project Support
 
@@ -46,12 +49,25 @@ Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, rename, signature 
 ## Requirements
 
 - Rust toolchain (for building)
-- Compact toolchain **0.31.1** (language 0.23.0) — the version pinned by Mainnet/Preprod/Preview
-  (install with `compact update 0.31.1`). Present for diagnostics.
-- `format-compact` (optional, for formatting)
+- Compact devtools (`compact`) with toolchain **0.31.1** — install with `compact update 0.31.1`.
+  Provides `compactc` (diagnostics) and `format-compact` (formatting).
 
-Newer toolchains (0.34.0/0.35.0, language 0.26/0.27) target ledger 9 and are also supported by the
-LSP, but cannot deploy to the public networks. See [`CLAUDE.md`](./CLAUDE.md) for the version map.
+### Version support
+
+The LSP reads the compiler's language version and **gates registry symbols** so one registry serves
+both the mainnet compiler and newer toolchains:
+
+| Toolchain | Language | Ledger | Deployable to public networks |
+|---|---|---|---|
+| **0.31.1** | **0.23.0** | 8 | ✅ Mainnet / Preprod / Preview (target) |
+| 0.34.0 | 0.26.0 | 9 | ❌ |
+| 0.35.0 | 0.27.0 | 9 | ❌ |
+
+Symbols added after language 0.23.0 (e.g. `keccak256`, added in 0.23.103) are hidden when the
+detected compiler rejects them. When no compiler is found, gating is disabled and all symbols are
+shown. Upstream release notes: <https://docs.midnight.network/relnotes/compact>; full version map
+and migration notes: [`MIGRATION_COMPILER_0.31.1.md`](./MIGRATION_COMPILER_0.31.1.md) and
+[`CLAUDE.md`](./CLAUDE.md).
 
 ## Building
 
@@ -74,6 +90,18 @@ The detected language version gates registry symbols added after 0.23.0 (e.g. `k
 hidden on the mainnet 0.23.0 compiler). When no compiler is found, gating is disabled and all
 symbols are shown. `format-compact` is found the same way (`COMPACT_FORMATTER`, then the devtools
 `bin/`, then `PATH`).
+
+## Development
+
+```bash
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release
+cargo test
+```
+
+GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` job that installs toolchain
+0.31.1 and runs the registry probe tests (which skip themselves when no compiler is present).
 
 ## Related Projects
 
