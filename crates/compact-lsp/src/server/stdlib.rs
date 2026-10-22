@@ -570,6 +570,25 @@ mod tests {
     }
 
     #[test]
+    fn test_is_available_gating_logic() {
+        let detected = Some(LanguageVersion::new(0, 23, 0));
+
+        // Empty minimum -> always available.
+        assert!(is_available("", detected));
+        assert!(is_available("", None));
+        // Unparseable minimum -> err toward showing.
+        assert!(is_available("not-a-version", detected));
+        // At or below the detected version -> available.
+        assert!(is_available("0.23.0", detected));
+        assert!(is_available("0.22.99", detected));
+        // Above the detected version -> hidden.
+        assert!(!is_available("0.23.1", detected));
+        assert!(!is_available("0.23.103", detected));
+        // Unknown detected version (no compiler) -> gating disabled.
+        assert!(is_available("0.23.103", None));
+    }
+
+    #[test]
     fn test_registry_uses_current_names() {
         // 0.21+ names present.
         assert!(find_stdlib_struct("ShieldedCoinInfo").is_some());

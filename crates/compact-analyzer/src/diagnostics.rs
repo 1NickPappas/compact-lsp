@@ -32,30 +32,30 @@ pub(crate) fn compact_directory() -> Option<PathBuf> {
         .map(|home| Path::new(&home).join(".compact"))
 }
 
-/// Resolve the Compact devtools active compiler.
+/// Resolve a Compact devtools `bin/<name>` entry to a runnable binary.
 ///
-/// `$COMPACT_DIRECTORY/bin/compactc` is a *wrapper script* that execs
-/// `compactc.bin` relative to its own real directory. Invoking it through the
-/// `bin/` symlink makes `$0` point at `bin/`, so the wrapper looks for a
-/// nonexistent `bin/compactc.bin`. Resolve the symlink to the versioned
-/// toolchain directory and use the real `compactc.bin` next to it instead.
-fn devtools_compiler() -> Option<String> {
-    let link = compact_directory()?.join("bin").join("compactc");
+/// `<dir>/bin/<name>` is typically a symlink into a versioned toolchain
+/// directory. For `compactc`, that target is a *wrapper script* that execs
+/// `compactc.bin` relative to its own real directory; invoking the wrapper
+/// through the `bin/` symlink makes `$0` point at `bin/`, so it looks for a
+/// nonexistent `bin/compactc.bin`. Resolve the symlink and prefer `<real_name>`
+/// next to the target. When `<real_name>` is absent, use the resolved target
+/// itself (e.g. `format-compact` is symlinked straight to the real binary).
+pub(crate) fn resolve_devtools_binary(dir: &Path, name: &str, real_name: &str) -> Option<String> {
+    let link = dir.join("bin").join(name);
     if !link.exists() {
         return None;
     }
 
-    if let Ok(real) = std::fs::canonicalize(&link) {
-        let bin = real.with_file_name("compactc.bin");
-        if bin.exists() {
-            return Some(bin.to_string_lossy().into_owned());
-        }
-        if real.exists() {
-            return Some(real.to_string_lossy().into_owned());
-        }
-    }
+    let resolved = std::fs::canonicalize(&link).ok()?;
+    let real = resolved.with_file_name(real_name);
+    let chosen = if real.exists() { real } else { resolved };
+    Some(chosen.to_string_lossy().into_owned())
+}
 
-    None
+/// The active compiler from the Compact devtools toolchain.
+fn devtools_compiler() -> Option<String> {
+    resolve_devtools_binary(&compact_directory()?, "compactc", "compactc.bin")
 }
 
 /// The diagnostic engine that wraps the compactc compiler.
@@ -471,15 +471,38 @@ mod tests {
             return;
         }
 
+        // Curated coverage of the registry: stdlib circuits (incl. a generic
+        // with a helper), ledger ADT methods, and a kernel method. Compiles
+        // cleanly on 0.23.0, so a `parse error` here means name resolution
+        // never ran and the assertions below would be meaningless.
         let source = r#"
 import CompactStandardLibrary;
+
+ledger counter: Counter;
 
 export circuit probeHash(x: Field): Bytes<32> {
     return persistentHash<Field>(x);
 }
 
+export circuit probeCommit(x: Field): Bytes<32> {
+    return persistentCommit<Field>(x, pad(32, "probe"));
+}
+
 export circuit probeSome(x: Field): Maybe<Field> {
     return some<Field>(x);
+}
+
+export circuit probeEither(x: Field): Either<Field, Field> {
+    return left<Field, Field>(x);
+}
+
+export circuit probeCounter(): Uint<64> {
+    counter.increment(1);
+    return counter.read();
+}
+
+export circuit probeKernel(): ContractAddress {
+    return kernel.self();
 }
 "#;
 
@@ -488,7 +511,18 @@ export circuit probeSome(x: Field): Maybe<Field> {
             None => return,
         };
 
-        for symbol in ["persistentHash", "some"] {
+        assert!(
+            !stderr.contains("parse error"),
+            "probe did not parse; name-resolution assertions are not meaningful:\n{stderr}"
+        );
+        for symbol in [
+            "persistentHash",
+            "persistentCommit",
+            "some",
+            "left",
+            "Counter",
+            "kernel",
+        ] {
             assert!(
                 !stderr.contains(&format!("unbound identifier {symbol}")),
                 "stable stdlib symbol `{symbol}` reported unbound:\n{stderr}"
@@ -534,6 +568,59 @@ export circuit probe(x: Field): Bytes<32> {
                 "language {language} should accept keccak256 (not gated):\n{stderr}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_resolve_devtools_binary_uses_real_binary() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let version_dir = root.join("versions").join("0.31.1").join("triple");
+        std::fs::create_dir_all(&version_dir).expect("version dir");
+
+        // The version dir holds the real binary plus the wrapper script.
+        let real_bin = version_dir.join("compactc.bin");
+        std::fs::write(&real_bin, b"real").expect("real bin");
+        std::fs::write(version_dir.join("compactc"), b"#!/bin/sh\n").expect("wrapper");
+
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).expect("bin dir");
+        symlink(version_dir.join("compactc"), bin.join("compactc")).expect("symlink");
+
+        // Must resolve past the wrapper symlink to the real binary, not the
+        // broken `bin/compactc` path. `tempdir` paths are themselves symlinked
+        // on macOS, so compare against the canonical path.
+        let expected_bin = std::fs::canonicalize(&real_bin)
+            .expect("canonical real bin")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            resolve_devtools_binary(root, "compactc", "compactc.bin"),
+            Some(expected_bin)
+        );
+
+        // A missing entry resolves to None.
+        assert_eq!(resolve_devtools_binary(root, "nope", "nope.bin"), None);
+
+        // When no `<real_name>` exists, the resolved target is used as-is
+        // (format-compact is symlinked straight to the real binary).
+        let real_format = version_dir.join("format-compact");
+        std::fs::write(&real_format, b"real").expect("format bin");
+        symlink(
+            version_dir.join("format-compact"),
+            bin.join("format-compact"),
+        )
+        .expect("format symlink");
+        let expected_format = std::fs::canonicalize(&real_format)
+            .expect("canonical real format")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            resolve_devtools_binary(root, "format-compact", "format-compact"),
+            Some(expected_format)
+        );
     }
 
     #[test]

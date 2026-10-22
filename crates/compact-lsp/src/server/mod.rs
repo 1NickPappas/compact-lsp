@@ -107,6 +107,41 @@ fn symbol_matches_query(name: &str, query: &str) -> bool {
     query.is_empty() || name.to_lowercase().contains(query)
 }
 
+/// Build the completion items contributed by the standard-library registry,
+/// gated by the detected language version.
+///
+/// Extracted from `completion` so the gating wiring (the version is actually
+/// threaded through to the `_for` lookups) can be unit-tested without a client.
+fn stdlib_completion_items(language: Option<LanguageVersion>) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+
+    for st in stdlib::all_stdlib_structs_for(language) {
+        // Show type params in the label (e.g. "Maybe<T>"); empty for
+        // non-generic structs. insert_text stays the bare name.
+        items.push(CompletionItem {
+            label: format!("{}{}", st.name, st.type_params),
+            kind: Some(CompletionItemKind::STRUCT),
+            detail: Some(st.description.to_string()),
+            insert_text: Some(st.name.to_string()),
+            ..Default::default()
+        });
+    }
+
+    for circ in stdlib::all_stdlib_circuits_for(language) {
+        items.push(CompletionItem {
+            label: circ.name.to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(circ.signature.to_string()),
+            documentation: Some(Documentation::String(circ.doc.to_string())),
+            insert_text: Some(circ.snippet.to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            ..Default::default()
+        });
+    }
+
+    items
+}
+
 impl CompactLanguageServer {
     /// Create a new language server instance.
     pub fn new(client: Client) -> Self {
@@ -1005,19 +1040,8 @@ impl LanguageServer for CompactLanguageServer {
             });
         }
 
-        // Stdlib struct types
-        for st in stdlib::all_stdlib_structs_for(self.language_version) {
-            // Show type params in the label (e.g. "Maybe<T>"); empty for
-            // non-generic structs. insert_text stays the bare name.
-            let label = format!("{}{}", st.name, st.type_params);
-            items.push(CompletionItem {
-                label,
-                kind: Some(CompletionItemKind::STRUCT),
-                detail: Some(st.description.to_string()),
-                insert_text: Some(st.name.to_string()),
-                ..Default::default()
-            });
-        }
+        // Standard-library structs and circuits, gated by language version.
+        items.extend(stdlib_completion_items(self.language_version));
 
         // Stdlib parameterized type snippets
         let stdlib_type_snippets = [
@@ -1040,19 +1064,6 @@ impl LanguageServer for CompactLanguageServer {
                 kind: Some(CompletionItemKind::SNIPPET),
                 detail: Some(detail.to_string()),
                 insert_text: Some(snippet.to_string()),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                ..Default::default()
-            });
-        }
-
-        // Stdlib circuit functions
-        for circ in stdlib::all_stdlib_circuits_for(self.language_version) {
-            items.push(CompletionItem {
-                label: circ.name.to_string(),
-                kind: Some(CompletionItemKind::FUNCTION),
-                detail: Some(circ.signature.to_string()),
-                documentation: Some(Documentation::String(circ.doc.to_string())),
-                insert_text: Some(circ.snippet.to_string()),
                 insert_text_format: Some(InsertTextFormat::SNIPPET),
                 ..Default::default()
             });
@@ -2136,6 +2147,20 @@ mod tests {
         assert!(symbol_matches_query("transferTokens", "transfer"));
         assert!(symbol_matches_query("transferTokens", "tokens")); // case-insensitive substring
         assert!(!symbol_matches_query("transferTokens", "withdraw"));
+    }
+
+    #[test]
+    fn test_stdlib_completion_items_gate_keccak() {
+        // The completion handler builds stdlib items through this helper, so
+        // this test guards the actual wiring (not just the registry lookups).
+        let mainnet = stdlib_completion_items(Some(LanguageVersion::new(0, 23, 0)));
+        assert!(!mainnet.iter().any(|i| i.label == "keccak256"));
+        assert!(mainnet.iter().any(|i| i.label == "persistentHash"));
+        assert!(mainnet.iter().any(|i| i.label == "Maybe<T>"));
+
+        // Unknown compiler -> gating disabled -> everything is offered.
+        let unknown = stdlib_completion_items(None);
+        assert!(unknown.iter().any(|i| i.label == "keccak256"));
     }
 
     #[test]

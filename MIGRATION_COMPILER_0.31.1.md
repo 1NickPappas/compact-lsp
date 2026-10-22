@@ -103,11 +103,18 @@ The fallback (remove `keccak256` outright) was not needed.
 ### Step 6 — Diagnostics compatibility + probe test ✅ done
 - [x] `compactc.bin --vscode --skip-zk <file> <tmp>` stderr format is unchanged on 0.31.1.
 - [x] Probe tests in `diagnostics.rs` (skip when no compiler is found):
-      - `test_probe_compile_stable_stdlib_symbols` — stable symbols compile clean;
+      - `test_probe_compile_stable_stdlib_symbols` — curated registry coverage (stdlib circuits,
+        ledger `Counter` methods, kernel `self`) compiles without parse errors or unbound symbols;
       - `test_probe_keccak256_age_gate_consistency` — asserts `keccak256` is rejected below
         language 0.23.103 and accepted at/above it, tying the gate to compiler reality;
       - `test_engine_detection_does_not_panic` — guards detection and asserts the resolved path
-        is a real file (not the broken wrapper).
+        is a real file (not the broken wrapper);
+      - `test_resolve_devtools_binary_uses_real_binary` — regression test for the wrapper-vs-symlink
+        bug (builds a fake devtools tree with a `bin/compactc` symlink and asserts the real
+        `compactc.bin` is chosen).
+- [x] Gating unit tests: `test_is_available_gating_logic` (empty/unparseable/older/equal/newer/unknown)
+      and `test_stdlib_completion_items_gate_keccak` (the completion handler's actual stdlib-item
+      builder omits `keccak256` on 0.23.0 and includes it when no compiler is detected).
 - [x] Noted new compiler flags (`--ledger-version`, `--runtime-version`, `--compact-path`,
       `--trace-search`); the startup message now reads ledger/runtime via the first two.
 

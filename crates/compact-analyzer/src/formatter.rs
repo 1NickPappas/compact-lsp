@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use crate::diagnostics::compact_directory;
+use crate::diagnostics::{compact_directory, resolve_devtools_binary};
 
 /// The formatter engine that wraps the format-compact binary.
 pub struct FormatterEngine {
@@ -49,12 +49,7 @@ impl FormatterEngine {
         // 2. Compact devtools active toolchain (format-compact is symlinked
         //    directly to the real binary).
         if let Some(dir) = compact_directory() {
-            let link = dir.join("bin").join("format-compact");
-            if link.exists() {
-                let path = std::fs::canonicalize(&link)
-                    .unwrap_or(link)
-                    .to_string_lossy()
-                    .into_owned();
+            if let Some(path) = resolve_devtools_binary(&dir, "format-compact", "format-compact") {
                 tracing::info!("Found formatter via Compact devtools: {}", path);
                 return Some(path);
             }
