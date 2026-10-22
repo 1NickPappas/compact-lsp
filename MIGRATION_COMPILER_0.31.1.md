@@ -126,15 +126,18 @@ The fallback (remove `keccak256` outright) was not needed.
 
 ### Step 8 — CI and gates ✅ done
 - [x] `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
-      `cargo build`, `cargo test` all pass (126 tests).
+      `cargo build`, `cargo test` all pass (130 tests).
 - [x] Added a `compiler-probe` CI job that installs devtools + toolchain 0.31.1 and runs the probe
 tests (`cargo test -p compact-analyzer probe`). The main `check` job stays compiler-free and fast;
 the probe tests skip there when no compiler is present.
 
-### Step 9 — Land
-- [ ] Merge `migrate/0.31.1` → `dev`; update `CHANGELOG.md`.
-- [ ] Decide whether to promote `dev` → `main` so the released line reflects 0.31.1.
-      (Recommended: yes — `main` currently misrepresents the project's language target.)
+### Step 9 — Land ✅ done (local; not pushed)
+- [x] Merged `migrate/0.31.1` → `dev` (fast-forward) and added a `CHANGELOG.md` entry.
+- [x] Promoted `dev` → `main` (fast-forward). `dev`, `main`, and `migrate/0.31.1` all point at the
+      same commit.
+- [ ] **Push** — pending; the user wants to test locally first.
+- [ ] Optional: normalize the 40 pre-existing files tracked as executable (`100755`) to `100644`
+      so pushing does not produce mode-change noise.
 
 ### Step 10 — Future track (documented, not implemented yet)
 - [ ] When public networks move to ledger 9, add language 0.26/0.27 support:

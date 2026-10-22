@@ -63,8 +63,8 @@ Remaining:
 
 - ✅ **`Cell` type completion** (`216d700`) — dropped `Cell`/`Cell<>` from the type-completion/snippet lists; it's not a writable type (a single-value field uses the bare type and *becomes* a Cell). Cell's ledger-ADT methods in `builtins.toml` are kept.
 - ✅ **Consolidate duplicate `is_builtin_type`** (`216d700`) — single source in `compact-analyzer` (`pub fn`, re-exported from `lib.rs`); `compact-lsp/src/server/validation.rs` re-exports it.
-- **[Revisit] `keccak256`** — once a 0.23.10x compiler is installable (`compact update`), re-run the probe to confirm and point `COMPACT_COMPILER` at it; until then the LSP is intentionally ahead of the released compiler on this one symbol.
-- **[Add] (optional) probe-compile dev check** — a small script/test that compiles a registry-coverage `.compact` contract with the detected compiler, to catch future stdlib drift automatically.
+- ✅ **`keccak256` gating** — resolved by version-aware `min_language_version` gating: hidden on the mainnet language 0.23.0 compiler (toolchain 0.31.1), offered on 0.23.103+. The LSP is no longer "ahead of the installed compiler".
+- ✅ **Probe-compile drift check** — the `compiler-probe` CI job installs toolchain 0.31.1 and runs the `diagnostics.rs` probe tests (stable-symbol coverage + keccak256 gate consistency). They self-skip when no compiler is present.
 
 ---
 
