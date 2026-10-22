@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Version-aware registry gating** — a `LanguageVersion` type and an optional
+  `min_language_version` on stdlib/builtins entries. Symbols added after language 0.23.0
+  (e.g. `keccak256`, added in 0.23.103) are hidden when the detected compiler rejects them.
+- **Compact devtools toolchain discovery** — the LSP now resolves the active toolchain
+  (`$COMPACT_DIRECTORY/bin/compactc` → real `compactc.bin`) for both the compiler and formatter.
+- `compiler-probe` CI job that installs toolchain 0.31.1 and runs the registry probe tests.
+
+### Changed
+- Target **Compact toolchain 0.31.1 (language 0.23.0)** — the version pinned by
+  Mainnet/Preprod/Preview. Toolchains 0.34/0.35 (ledger 9) are not deployable to public networks.
+- Startup now logs compiler, language, ledger, and runtime versions.
+- CI runs on `dev` as well as `main`.
+
 ## [0.1.0] - 2025-01-XX
 
 ### Added
