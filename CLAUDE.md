@@ -8,6 +8,30 @@ A Language Server Protocol (LSP) implementation for [Compact](https://docs.midni
 
 This is a self-contained git repository. The `CLAUDE.md` in the parent `midnight/lsp/` directory describes a different, broader monorepo and does not apply here.
 
+**Current target: Compact toolchain 0.31.1 (language 0.23.0, runtime 0.16.0, ledger 8)** — the version pinned by Mainnet/Preprod/Preview. Toolchains 0.34.0/0.35.0 target ledger 9 and are **not deployable to public networks**. See [`MIGRATION_COMPILER_0.31.1.md`](./MIGRATION_COMPILER_0.31.1.md).
+
+## Upstream sources of truth (where to watch for changes)
+
+- **Release notes**: <https://docs.midnight.network/relnotes/compact> (overview) and
+  `https://docs.midnight.network/relnotes/compact/toolchain-<version>.md` (per version).
+  Append `.md` to any docs.midnight.network path — the HTML pages are behind a Vercel
+  security checkpoint and do not fetch reliably. Compatibility matrix:
+  <https://docs.midnight.network/relnotes/support-matrix.md> (which toolchain the public
+  networks pin). Docs index for LLMs: <https://docs.midnight.network/llms.txt>.
+- **Compiler source — `LFDT-Minokawa/compact`** (<https://github.com/LFDT-Minokawa/compact>):
+  `CHANGELOG.md` is the authoritative per-toolchain history (replaces the discontinued
+  `CHANGELOG_compactc.md`); `compiler/standard-library.compact`, `doc/compact-reference.mdx`,
+  and `doc/release-notes/toolchain-*.md` are the language/API references.
+- **Public release artifacts — `midnightntwrk/compact`**
+  (<https://github.com/midnightntwrk/compact/releases>).
+- **Grammar — `midnightntwrk/compact-tree-sitter`**: the only branch supporting current
+  syntax is `feat/grammar-v0.30.0` (the pin above).
+
+> **Gotcha:** compiler crate versions such as `0.31.103` (language `0.23.103`) are internal
+> build versions, **not released toolchains**. Do not assume they are installable or
+> mainnet-safe. Map: 0.31.x → language 0.23.0; 0.32 → 0.24; 0.33 → 0.25; 0.34 → 0.26
+> (ledger 9); 0.35 → 0.27 (ledger 9).
+
 ## Build & Test Commands
 
 ```bash
@@ -32,7 +56,8 @@ Cargo workspace with two crates. Shared dependency versions are pinned in the ro
 
 The analysis layer, independent of the LSP protocol. Exposes three engines via `lib.rs`:
 
-- **`DiagnosticEngine`** (`diagnostics.rs`) — wraps the external `compactc.bin` compiler as an async subprocess (`compactc.bin --vscode <file> <temp_dir>`), parsing stderr lines of the form `Exception: <file> line <l> char <c>: <msg>` into LSP `Diagnostic`s. Compiler is auto-detected in this order: `COMPACT_COMPILER` env var → `~/compactc/compactc.bin` → `compactc.bin` on `PATH`. Degrades gracefully (no diagnostics) when absent. `version_info()` reports the detected compiler + language version (logged on startup). Note: diagnostics carry only a message (no `code`/structured data) and a 1-char range.
+- **`DiagnosticEngine`** (`diagnostics.rs`) — wraps the external `compactc.bin` compiler as an async subprocess (`compactc.bin --vscode --skip-zk <file> <temp_dir>`), parsing stderr lines of the form `Exception: <file> line <l> char <c>: <msg>` into LSP `Diagnostic`s. Compiler is auto-detected in this order: `COMPACT_COMPILER` env var → Compact devtools active toolchain `$COMPACT_DIRECTORY/bin/compactc` (default `~/.compact/bin/compactc`, the symlink `compact update` repoints; **resolved through the wrapper to the real `compactc.bin`**, since the `bin/compactc` wrapper breaks when invoked via its symlink) → `~/compactc/compactc.bin` → `compactc.bin`/`compactc` on `PATH`. Degrades gracefully (no diagnostics) when absent. `version_info()` / `language_version()` report the detected compiler and language versions (logged on startup). Note: diagnostics carry only a message (no `code`/structured data) and a 1-char range.
+- **`LanguageVersion`** (`version.rs`) — a parsed semantic version used for **version-aware registry gating** (see below).
 - **`FormatterEngine`** (`formatter.rs`) — wraps the external `format-compact` binary.
 - **`ParserEngine`** (`parser/mod.rs`, ~2700 lines) — wraps `tree-sitter-compact` (pulled from git). This is the heart of every AST-driven feature: document symbols, folding, hover, go-to-definition, signature help, completion symbols, import extraction, syntax errors, semantic tokens, and find-references. Operations take `&mut self` (the tree-sitter `Parser` is mutable).
 
@@ -55,7 +80,8 @@ The analysis layer, independent of the LSP protocol. Exposes three engines via `
 - **Cross-file support.** On `initialize`, `scan_workspace` parses every `.compact` file to populate `symbol_cache` (completion + `workspace/symbol`) and `source_cache` (hover/definition across files); per-file updates happen on `did_open` and `did_save`. `reverse_dependencies` propagates compiler errors to dependent files on save. Import-prefixed symbols (`import "./Utils" prefix Utils_;`) resolve through `imports.rs`.
 - **Data-driven registries.** `server/builtins.toml` (methods on built-in ledger types like `Counter`, `Map`, `Kernel`) and `server/stdlib.toml` (stdlib structs/circuits) are embedded at compile time (`include_str!`) and parsed once behind a `OnceLock` in `builtins.rs` / `stdlib.rs`. To add/change a built-in method or stdlib symbol, edit the TOML — not the Rust. The registries also synthesize markdown doc "files" so go-to-definition works on built-ins.
   - **Target: Compact language 0.23.x.** Source of truth is the LFDT-Minokawa Compact repo (the `official_compact` checkout / `minokawa` remote): `compiler/standard-library.compact` (snake_case fields, signatures), `doc/api/CompactStandardLibrary/exports.md` (full public symbols incl. compiler intrinsics), `doc/ledger-adt.mdx` (ledger ADT methods). The same `is_builtin_type` keyword/type list is duplicated in `server/validation.rs` and `parser/mod.rs` — keep them in lockstep.
-  - **The registry can be ahead of the installed compiler.** The latest *source* (0.23.103) may include symbols the installed compiler (0.23.0) rejects — e.g. `keccak256`. Verify registry changes by compiling a probe `.compact` contract with the detected compiler (unbound/wrong-signature symbols error before disclosure analysis, so a clean or disclosure-only compile validates the symbols).
+  - **Version-aware gating.** Registry entries may carry `min_language_version`. At presentation time (completion/hover/definition/signature help) `stdlib.rs`/`builtins.rs` filter against the detected compiler's language version, so one registry serves both the mainnet compiler (0.23.0) and newer ones. A `min_language_version` above the detected version is hidden; when **no compiler is detected the filter is disabled** (everything shows), since the LSP cannot know the version. Example: `keccak256` has `min_language_version = "0.23.103"`, so it is offered on 0.23.103+ but hidden on the mainnet 0.23.0 compiler.
+  - **Verify registry changes** by compiling a probe `.compact` contract with the detected compiler (unbound/wrong-signature symbols error before disclosure analysis, so a clean or disclosure-only compile validates the symbols). `cargo test` includes a probe test that skips itself when no compiler is found.
 
 ## Conventions
 

@@ -16,6 +16,48 @@
 // We use ls-types (aliased as lsp-types in Cargo.toml), which is compatible with tower-lsp-server
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
+use std::path::{Path, PathBuf};
+
+use crate::version::LanguageVersion;
+
+/// The Compact devtools artifact directory: `$COMPACT_DIRECTORY` or `~/.compact`.
+pub(crate) fn compact_directory() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("COMPACT_DIRECTORY") {
+        if !dir.is_empty() {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|home| Path::new(&home).join(".compact"))
+}
+
+/// Resolve the Compact devtools active compiler.
+///
+/// `$COMPACT_DIRECTORY/bin/compactc` is a *wrapper script* that execs
+/// `compactc.bin` relative to its own real directory. Invoking it through the
+/// `bin/` symlink makes `$0` point at `bin/`, so the wrapper looks for a
+/// nonexistent `bin/compactc.bin`. Resolve the symlink to the versioned
+/// toolchain directory and use the real `compactc.bin` next to it instead.
+fn devtools_compiler() -> Option<String> {
+    let link = compact_directory()?.join("bin").join("compactc");
+    if !link.exists() {
+        return None;
+    }
+
+    if let Ok(real) = std::fs::canonicalize(&link) {
+        let bin = real.with_file_name("compactc.bin");
+        if bin.exists() {
+            return Some(bin.to_string_lossy().into_owned());
+        }
+        if real.exists() {
+            return Some(real.to_string_lossy().into_owned());
+        }
+    }
+
+    None
+}
+
 /// The diagnostic engine that wraps the compactc compiler.
 ///
 /// This is the main interface between the LSP and the compiler.
@@ -31,22 +73,31 @@ impl DiagnosticEngine {
         Self { compiler_path }
     }
 
-    /// Try to find the compactc.bin compiler in common locations.
+    /// Try to find the compactc compiler in common locations.
     ///
     /// Search order:
-    /// 1. COMPACT_COMPILER environment variable
-    /// 2. ~/compactc/compactc.bin
-    /// 3. compactc.bin in PATH
+    /// 1. `COMPACT_COMPILER` environment variable
+    /// 2. Compact devtools active toolchain: `$COMPACT_DIRECTORY/bin/compactc`
+    ///    (default `~/.compact/bin/compactc`) — `compact update <ver>` repoints this
+    ///    symlink, so this tracks whichever toolchain the user activated.
+    /// 3. `~/compactc/compactc.bin`
+    /// 4. `compactc.bin` on `PATH`
     fn find_compiler() -> Option<String> {
         // 1. Check environment variable
         if let Ok(path) = std::env::var("COMPACT_COMPILER") {
-            if std::path::Path::new(&path).exists() {
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
                 tracing::info!("Found compiler via COMPACT_COMPILER env: {}", path);
                 return Some(path);
             }
         }
 
-        // 2. Check ~/compactc/compactc.bin
+        // 2. Compact devtools active toolchain.
+        if let Some(path) = devtools_compiler() {
+            tracing::info!("Found compiler via Compact devtools: {}", path);
+            return Some(path);
+        }
+
+        // 3. Check ~/compactc/compactc.bin
         if let Ok(home) = std::env::var("HOME") {
             let path = std::path::Path::new(&home)
                 .join("compactc")
@@ -58,19 +109,20 @@ impl DiagnosticEngine {
             }
         }
 
-        // 3. Check PATH
-        if let Ok(output) = std::process::Command::new("which")
-            .arg("compactc.bin")
-            .output()
-        {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                tracing::info!("Found compiler in PATH: {}", path);
-                return Some(path);
+        // 4. Check PATH
+        for name in ["compactc.bin", "compactc"] {
+            if let Ok(output) = std::process::Command::new("which").arg(name).output() {
+                if output.status.success() {
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !path.is_empty() {
+                        tracing::info!("Found compiler in PATH: {}", path);
+                        return Some(path);
+                    }
+                }
             }
         }
 
-        tracing::warn!("Could not find compactc.bin compiler");
+        tracing::warn!("Could not find compactc compiler");
         None
     }
 
@@ -79,21 +131,41 @@ impl DiagnosticEngine {
         self.compiler_path.is_some()
     }
 
+    /// Run a single compiler flag and return its trimmed stdout, when it succeeds.
+    fn run_flag(&self, flag: &str) -> Option<String> {
+        let path = self.compiler_path.as_ref()?;
+        std::process::Command::new(path)
+            .arg(flag)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
     /// Detect the compiler and language versions by invoking the compiler.
     /// Returns `(compiler_version, language_version)` when available.
     pub fn version_info(&self) -> Option<(String, String)> {
-        let path = self.compiler_path.as_ref()?;
-        let run = |flag: &str| {
-            std::process::Command::new(path)
-                .arg(flag)
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        };
-        let compiler = run("--version")?;
-        let language = run("--language-version").unwrap_or_default();
+        let compiler = self.run_flag("--version")?;
+        let language = self.run_flag("--language-version").unwrap_or_default();
         Some((compiler, language))
+    }
+
+    /// The parsed language version the detected compiler targets (`0.23.0` for
+    /// toolchain 0.31.1). `None` when no compiler is available or it cannot be parsed.
+    pub fn language_version(&self) -> Option<LanguageVersion> {
+        LanguageVersion::parse(&self.run_flag("--language-version")?)
+    }
+
+    /// The Midnight ledger version the detected compiler targets
+    /// (e.g. `ledger-8.0.0` for toolchain 0.31.1).
+    pub fn ledger_version(&self) -> Option<String> {
+        self.run_flag("--ledger-version")
+    }
+
+    /// The Compact runtime version the detected compiler targets.
+    pub fn runtime_version(&self) -> Option<String> {
+        self.run_flag("--runtime-version")
     }
 
     /// Run diagnostics on a file and return LSP Diagnostic objects.
@@ -348,6 +420,121 @@ fn parse_error_line(line: &str) -> Option<Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_engine_detection_does_not_panic() {
+        // Detection depends on the host; this simply guards the search logic.
+        let engine = DiagnosticEngine::new();
+        let _ = engine.is_available();
+        let _ = engine.version_info();
+        let _ = engine.language_version();
+        let _ = engine.ledger_version();
+        let _ = engine.runtime_version();
+
+        // A detected devtools compiler must be an executable file. This guards
+        // against regressing to the broken `~/.compact/bin/compactc` wrapper.
+        if let Some(path) = engine.compiler_path.as_deref() {
+            assert!(
+                std::path::Path::new(path).is_file(),
+                "detected compiler path is not a file: {path}"
+            );
+        }
+    }
+
+    /// Run the detected compiler over `source` and return its combined stderr.
+    ///
+    /// Returns `None` when no compiler is available, so callers skip.
+    fn compile_probe(engine: &DiagnosticEngine, source: &str) -> Option<String> {
+        let compiler = engine.compiler_path.as_ref()?;
+        let dir = tempfile::tempdir().ok()?;
+        let source_path = dir.path().join("probe.compact");
+        std::fs::write(&source_path, source).ok()?;
+
+        let output = std::process::Command::new(compiler)
+            .arg("--vscode")
+            .arg("--skip-zk")
+            .arg(&source_path)
+            .arg(dir.path())
+            .output()
+            .ok()?;
+
+        Some(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+
+    /// Probe-compile stable stdlib symbols; they must not be reported as unbound
+    /// on any supported compiler. Skips when no compiler is available.
+    #[test]
+    fn test_probe_compile_stable_stdlib_symbols() {
+        let engine = DiagnosticEngine::new();
+        if !engine.is_available() {
+            eprintln!("skipping probe: no compactc detected");
+            return;
+        }
+
+        let source = r#"
+import CompactStandardLibrary;
+
+export circuit probeHash(x: Field): Bytes<32> {
+    return persistentHash<Field>(x);
+}
+
+export circuit probeSome(x: Field): Maybe<Field> {
+    return some<Field>(x);
+}
+"#;
+
+        let stderr = match compile_probe(&engine, source) {
+            Some(s) => s,
+            None => return,
+        };
+
+        for symbol in ["persistentHash", "some"] {
+            assert!(
+                !stderr.contains(&format!("unbound identifier {symbol}")),
+                "stable stdlib symbol `{symbol}` reported unbound:\n{stderr}"
+            );
+        }
+    }
+
+    /// The reason `keccak256` is version-gated: on a compiler older than language
+    /// 0.23.103 (the mainnet 0.31.1 / 0.23.0 toolchain) it is an unbound identifier.
+    #[test]
+    fn test_probe_keccak256_age_gate_consistency() {
+        let engine = DiagnosticEngine::new();
+        if !engine.is_available() {
+            eprintln!("skipping probe: no compactc detected");
+            return;
+        }
+        let Some(language) = engine.language_version() else {
+            return;
+        };
+
+        let source = r#"
+import CompactStandardLibrary;
+
+export circuit probe(x: Field): Bytes<32> {
+    return keccak256<Field>(x);
+}
+"#;
+
+        let stderr = match compile_probe(&engine, source) {
+            Some(s) => s,
+            None => return,
+        };
+        let rejected = stderr.contains("unbound identifier keccak256");
+
+        if language < LanguageVersion::new(0, 23, 103) {
+            assert!(
+                rejected,
+                "language {language} should reject keccak256 (gated in the registry):\n{stderr}"
+            );
+        } else {
+            assert!(
+                !rejected,
+                "language {language} should accept keccak256 (not gated):\n{stderr}"
+            );
+        }
+    }
 
     #[test]
     fn test_parse_error_line() {

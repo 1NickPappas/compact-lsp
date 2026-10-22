@@ -6,9 +6,10 @@ Each remaining item is tagged **[Add] / [Update] / [Remove]** with the file to t
 
 ## Status
 
-**Target language: 0.23.103** (latest LFDT-Minokawa source). Installed/installable compiler: 0.31.0 = language **0.23.0**. The registries are verified against the 0.23.0 compiler (probe-compiled) and otherwise track the 0.23.103 source.
+**Target: Compact toolchain 0.31.1 = language 0.23.0** (the Mainnet/Preprod/Preview pin; see `MIGRATION_COMPILER_0.31.1.md`). The registry tracks the 0.23.x source line but **gates** symbols added after 0.23.0 (`min_language_version`), so the mainnet compiler is never offered a symbol it rejects. 0.34.0/0.35.0 (language 0.26/0.27, ledger 9) are not deployable to public networks.
 
 Completed:
+- ✅ **0.31.1 migration** (`migrate/0.31.1`) — compiler discovery now resolves the Compact devtools active toolchain; registries gate by detected language version; probe tests compile against the detected compiler. Details in `MIGRATION_COMPILER_0.31.1.md`.
 - ✅ **Parser node-kind correctness bugs** (`f062c71`) — `const_binding`→`const_stmt`, removed dead `let_binding`/`call_args` arms, fixed `rtype`→`type` return-type field; regression tests added.
 - ✅ **Stdlib / keyword accuracy → language 0.23.103** (`907d36e`, `676c505`, `5a74533`, `19d8e47`) — snake_case fields; `Coin*`→`Shielded*`; `CurvePoint`→`JubjubPoint`; unshielded-token family + `UserAddress`; Kernel `mintShielded`/`mintUnshielded` + `balance*`/`claimUnshieldedCoinSpend`/`incUnshielded*`; keyword list (`type`/`new`/`from`/`slice`, dropped `while`/`let`/`public`/`private`); dropped stale `Void`/`Address`; added `keccak256`. Verified by compiling a probe contract with compactc 0.23.0.
 - ✅ **Pre-existing fixes** — block-comment doc extraction (`ac0080b`), repo reformat + `rust-toolchain.toml` pin to 1.91.1 (`9bd2151`, `8a9f1e3`), `redundant_closure` fix (`d872a1f`).
@@ -18,9 +19,9 @@ Completed:
 
 ## Background
 
-- **Installed compiler** (via the `compact` version manager): toolchain 0.31.0 = language **0.23.0**. The latest *source* is **0.23.103** (LFDT-Minokawa `main`), ahead of the public release channel — so `keccak256` is in the registry but the installed 0.23.0 compiler rejects it until a 0.23.10x toolchain is released.
-- **Point the LSP at the right compiler** with `COMPACT_COMPILER=$HOME/.compact/versions/0.31.0/aarch64-darwin/compactc.bin` (detection order is `COMPACT_COMPILER` → `~/compactc/compactc.bin` → PATH).
-- **Verification method now available**: compile a probe `.compact` contract that exercises stdlib structs/fields, circuits, ledger ADT and kernel methods with the installed compiler; unbound/wrong-signature symbols error before disclosure analysis, so a clean (or disclosure-only-error) compile validates the registry.
+- **Installed compiler** (via the `compact` version manager): toolchain 0.31.1 = language **0.23.0**. The latest *source* is 0.23.10x (LFDT-Minokawa `main`), ahead of the public release channel — so symbols such as `keccak256` (0.23.103) are in the registry but the 0.23.0 compiler rejects them. They are now hidden by `min_language_version` gating.
+- **Compiler discovery** (implemented): `COMPACT_COMPILER` → Compact devtools `$COMPACT_DIRECTORY/bin/compactc` (resolved to the real `compactc.bin`) → `~/compactc/compactc.bin` → `PATH`. `~/.compact/bin/compactc` is a wrapper that breaks when invoked through the symlink, so the LSP resolves to `compactc.bin`.
+- **Verification method now available**: `cargo test` includes probe tests that compile a `.compact` contract with the detected compiler (skipped when none is found); unbound/wrong-signature symbols error before disclosure analysis, so a clean (or disclosure-only-error) compile validates the registry.
 
 ## Source-of-truth references
 
@@ -28,7 +29,8 @@ Completed:
   - `compiler/standard-library.compact` — stdlib structs/circuits (snake_case fields, signatures)
   - `doc/api/CompactStandardLibrary/exports.md` — full public symbol set incl. compiler intrinsics
   - `doc/ledger-adt.mdx` — ledger ADT (Kernel/Cell/Counter/Set/Map/List/MerkleTree) methods
-  - `CHANGELOG_compactc.md` — detailed per-version language/stdlib history
+  - `CHANGELOG.md` — authoritative per-toolchain language/stdlib history (replaces the discontinued `CHANGELOG_compactc.md`)
+- Release notes: `https://docs.midnight.network/relnotes/compact` (use the `.md` suffix); support matrix: `https://docs.midnight.network/relnotes/support-matrix.md`.
 - `compact-tree-sitter` — `grammar.js`, `src/node-types.json`. The LSP currently pins the `feat/grammar-v0.30.0` branch (0.23-capable); `main` is still the older line-comments-only grammar until the branch merges.
 
 ---

@@ -9,9 +9,12 @@
 //! - Method lookup for completions and hover
 //! - Generated markdown doc files for go-to-definition on built-in types
 
+use compact_analyzer::LanguageVersion;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
+
+use super::stdlib::is_available;
 
 /// A built-in method available on a Compact type.
 pub struct BuiltinMethod {
@@ -23,6 +26,9 @@ pub struct BuiltinMethod {
     pub snippet: &'static str,
     /// Documentation string.
     pub documentation: &'static str,
+    /// Minimum language version required to use this method.
+    /// Empty means it is available in every version.
+    pub min_language_version: &'static str,
 }
 
 // ── TOML deserialization structures ─────────────────────────────────
@@ -48,6 +54,8 @@ struct MethodDef {
     signature: String,
     snippet: String,
     doc: String,
+    #[serde(default)]
+    min_language_version: String,
 }
 
 // ── Parsed + converted registry ─────────────────────────────────────
@@ -88,6 +96,7 @@ fn registry() -> &'static ParsedRegistry {
                         signature: Box::leak(m.signature.into_boxed_str()),
                         snippet: Box::leak(m.snippet.into_boxed_str()),
                         documentation: Box::leak(m.doc.into_boxed_str()),
+                        min_language_version: Box::leak(m.min_language_version.into_boxed_str()),
                     })
                     .collect(),
             })
@@ -107,11 +116,32 @@ pub fn methods_for_type(type_name: &str) -> &'static [BuiltinMethod] {
         .unwrap_or(&[])
 }
 
+/// Return the built-in methods available for the detected language version.
+pub fn methods_for_type_for(
+    type_name: &str,
+    language: Option<LanguageVersion>,
+) -> Vec<&'static BuiltinMethod> {
+    methods_for_type(type_name)
+        .iter()
+        .filter(|m| is_available(m.min_language_version, language))
+        .collect()
+}
+
 /// Find a specific built-in method by type and method name.
 pub fn find_method_by_name(type_name: &str, method_name: &str) -> Option<&'static BuiltinMethod> {
     methods_for_type(type_name)
         .iter()
         .find(|m| m.name == method_name)
+}
+
+/// Find a built-in method by type and name, respecting the detected language version.
+pub fn find_method_by_name_for(
+    type_name: &str,
+    method_name: &str,
+    language: Option<LanguageVersion>,
+) -> Option<&'static BuiltinMethod> {
+    let method = find_method_by_name(type_name, method_name)?;
+    is_available(method.min_language_version, language).then_some(method)
 }
 
 /// Extract the base type name from a potentially parameterized type string.
@@ -432,6 +462,20 @@ mod tests {
     #[test]
     fn test_find_method_by_name_unknown_type() {
         assert!(find_method_by_name("Boolean", "increment").is_none());
+    }
+
+    #[test]
+    fn test_version_gated_method_lookup() {
+        let mainnet = LanguageVersion::new(0, 23, 0);
+
+        // No built-in method is version-gated yet, so the filtered lookup matches
+        // the unfiltered one for both a detected version and an absent compiler.
+        for language in [Some(mainnet), None] {
+            let filtered = methods_for_type_for("Counter", language);
+            assert_eq!(filtered.len(), methods_for_type("Counter").len());
+            assert!(find_method_by_name_for("Counter", "increment", language).is_some());
+            assert!(find_method_by_name_for("Counter", "unknown_method", language).is_none());
+        }
     }
 
     #[test]

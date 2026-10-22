@@ -23,8 +23,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use compact_analyzer::{
-    CompletionSymbol, CompletionSymbolKind, DiagnosticEngine, FormatterEngine, ParserEngine,
-    SymbolLocation,
+    CompletionSymbol, CompletionSymbolKind, DiagnosticEngine, FormatterEngine, LanguageVersion,
+    ParserEngine, SymbolLocation,
 };
 use dashmap::DashMap;
 use lsp_types::*;
@@ -51,6 +51,11 @@ pub struct CompactLanguageServer {
 
     /// The formatter engine that wraps format-compact.
     formatter_engine: Arc<FormatterEngine>,
+
+    /// The language version the detected compiler targets (e.g. `0.23.0` for the
+    /// mainnet toolchain 0.31.1). Used to gate registry symbols added in later
+    /// language versions. `None` when no compiler is available (gating disabled).
+    language_version: Option<LanguageVersion>,
 
     /// The parser engine for tree-sitter based features.
     parser_engine: Arc<Mutex<ParserEngine>>,
@@ -123,11 +128,20 @@ impl CompactLanguageServer {
         let parser_engine = ParserEngine::new();
         tracing::info!("Tree-sitter parser initialized");
 
+        let language_version = diagnostic_engine.language_version();
+        match language_version {
+            Some(v) => tracing::info!("Detected language version: {v} (registry gating enabled)"),
+            None => tracing::warn!(
+                "Language version unavailable - registry gating disabled (all symbols shown)"
+            ),
+        }
+
         Self {
             client,
             documents: Arc::new(DashMap::new()),
             diagnostic_engine: Arc::new(diagnostic_engine),
             formatter_engine: Arc::new(formatter_engine),
+            language_version,
             parser_engine: Arc::new(Mutex::new(parser_engine)),
             workspace_root: Arc::new(Mutex::new(None)),
             symbol_cache: Arc::new(DashMap::new()),
@@ -609,7 +623,14 @@ impl LanguageServer for CompactLanguageServer {
         // visible in the logs.
         let version_msg = match self.diagnostic_engine.version_info() {
             Some((compiler, language)) if !language.is_empty() => {
-                format!("Compact compiler {compiler} (language {language})")
+                let ledger = self.diagnostic_engine.ledger_version();
+                let runtime = self.diagnostic_engine.runtime_version();
+                match (ledger, runtime) {
+                    (Some(ledger), Some(runtime)) => format!(
+                        "Compact compiler {compiler} (language {language}, {ledger}, runtime {runtime})"
+                    ),
+                    _ => format!("Compact compiler {compiler} (language {language})"),
+                }
             }
             Some((compiler, _)) => format!("Compact compiler {compiler}"),
             None => "Compact compiler version unavailable".to_string(),
@@ -761,7 +782,7 @@ impl LanguageServer for CompactLanguageServer {
                 if let Some(type_str) = var_type {
                     let base_type = builtins::extract_base_type(&type_str);
                     tracing::debug!("Dot completion: resolved type = {}", base_type);
-                    let methods = builtins::methods_for_type(base_type);
+                    let methods = builtins::methods_for_type_for(base_type, self.language_version);
                     if !methods.is_empty() {
                         let items: Vec<CompletionItem> = methods
                             .iter()
@@ -985,7 +1006,7 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Stdlib struct types
-        for st in stdlib::all_stdlib_structs() {
+        for st in stdlib::all_stdlib_structs_for(self.language_version) {
             // Show type params in the label (e.g. "Maybe<T>"); empty for
             // non-generic structs. insert_text stays the bare name.
             let label = format!("{}{}", st.name, st.type_params);
@@ -1025,7 +1046,7 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Stdlib circuit functions
-        for circ in stdlib::all_stdlib_circuits() {
+        for circ in stdlib::all_stdlib_circuits_for(self.language_version) {
             items.push(CompletionItem {
                 label: circ.name.to_string(),
                 kind: Some(CompletionItemKind::FUNCTION),
@@ -1417,7 +1438,11 @@ impl LanguageServer for CompactLanguageServer {
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
-                if let Some(method) = builtins::find_method_by_name(base_type, &ctx.member_name) {
+                if let Some(method) = builtins::find_method_by_name_for(
+                    base_type,
+                    &ctx.member_name,
+                    self.language_version,
+                ) {
                     let hover_text = format!(
                         "```compact\n{}.{}  (on {})\n```\n\n{}",
                         ctx.base_name, method.signature, type_str, method.documentation
@@ -1456,7 +1481,7 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Stdlib circuit hover (e.g., hovering on "sendShielded")
-        if let Some(circ) = stdlib::find_stdlib_circuit(&word) {
+        if let Some(circ) = stdlib::find_stdlib_circuit_for(&word, self.language_version) {
             let mut hover_text = format!(
                 "```compact\ncircuit {}\n```\n\n{}",
                 circ.signature, circ.doc
@@ -1478,7 +1503,7 @@ impl LanguageServer for CompactLanguageServer {
 
         // Stdlib struct hover (e.g., hovering on "ShieldedCoinInfo", "Maybe")
         let base_type = builtins::extract_base_type(&word);
-        if let Some(st) = stdlib::find_stdlib_struct(base_type) {
+        if let Some(st) = stdlib::find_stdlib_struct_for(base_type, self.language_version) {
             let mut hover_text = if st.type_params.is_empty() {
                 format!("**{}**\n\n{}\n\n", st.name, st.description)
             } else {
@@ -1740,7 +1765,7 @@ impl LanguageServer for CompactLanguageServer {
         }
 
         // Stdlib circuit function signature help
-        if let Some(circ) = stdlib::find_stdlib_circuit(&func_name) {
+        if let Some(circ) = stdlib::find_stdlib_circuit_for(&func_name, self.language_version) {
             let active_param =
                 utils::count_commas_before_cursor(&content, position.line, position.character);
             // Build detail string from signature: "sendShielded(input: QualifiedShieldedCoinInfo, ...): ShieldedSendResult" → "(input: QualifiedShieldedCoinInfo, ...): ShieldedSendResult"

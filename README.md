@@ -46,8 +46,12 @@ Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, rename, signature 
 ## Requirements
 
 - Rust toolchain (for building)
-- `compactc` compiler (for diagnostics)
+- Compact toolchain **0.31.1** (language 0.23.0) — the version pinned by Mainnet/Preprod/Preview
+  (install with `compact update 0.31.1`). Present for diagnostics.
 - `format-compact` (optional, for formatting)
+
+Newer toolchains (0.34.0/0.35.0, language 0.26/0.27) target ledger 9 and are also supported by the
+LSP, but cannot deploy to the public networks. See [`CLAUDE.md`](./CLAUDE.md) for the version map.
 
 ## Building
 
@@ -59,10 +63,17 @@ Binary: `target/release/compact-lsp`
 
 ## Compiler Location
 
-The LSP auto-detects `compactc.bin`:
+The LSP auto-detects the `compactc` compiler:
 1. `COMPACT_COMPILER` environment variable
-2. `~/compactc/compactc.bin`
-3. `compactc.bin` in PATH
+2. Compact devtools active toolchain `$COMPACT_DIRECTORY/bin/compactc` (default `~/.compact/bin/compactc`;
+   the symlink `compact update <ver>` repoints) — resolved to the real `compactc.bin`
+3. `~/compactc/compactc.bin`
+4. `compactc.bin` / `compactc` in `PATH`
+
+The detected language version gates registry symbols added after 0.23.0 (e.g. `keccak256`, which is
+hidden on the mainnet 0.23.0 compiler). When no compiler is found, gating is disabled and all
+symbols are shown. `format-compact` is found the same way (`COMPACT_FORMATTER`, then the devtools
+`bin/`, then `PATH`).
 
 ## Related Projects
 

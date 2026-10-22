@@ -14,6 +14,8 @@
 
 use std::path::Path;
 
+use crate::diagnostics::compact_directory;
+
 /// The formatter engine that wraps the format-compact binary.
 pub struct FormatterEngine {
     /// Path to the format-compact binary
@@ -30,19 +32,35 @@ impl FormatterEngine {
     /// Try to find the format-compact binary in common locations.
     ///
     /// Search order:
-    /// 1. COMPACT_FORMATTER environment variable
-    /// 2. ~/compactc/format-compact
-    /// 3. format-compact in PATH
+    /// 1. `COMPACT_FORMATTER` environment variable
+    /// 2. Compact devtools active toolchain: `$COMPACT_DIRECTORY/bin/format-compact`
+    ///    (default `~/.compact/bin/format-compact`)
+    /// 3. `~/compactc/format-compact`
+    /// 4. `format-compact` on `PATH`
     fn find_formatter() -> Option<String> {
         // 1. Check environment variable
         if let Ok(path) = std::env::var("COMPACT_FORMATTER") {
-            if Path::new(&path).exists() {
+            if !path.is_empty() && Path::new(&path).exists() {
                 tracing::info!("Found formatter via COMPACT_FORMATTER env: {}", path);
                 return Some(path);
             }
         }
 
-        // 2. Check ~/compactc/format-compact
+        // 2. Compact devtools active toolchain (format-compact is symlinked
+        //    directly to the real binary).
+        if let Some(dir) = compact_directory() {
+            let link = dir.join("bin").join("format-compact");
+            if link.exists() {
+                let path = std::fs::canonicalize(&link)
+                    .unwrap_or(link)
+                    .to_string_lossy()
+                    .into_owned();
+                tracing::info!("Found formatter via Compact devtools: {}", path);
+                return Some(path);
+            }
+        }
+
+        // 3. Check ~/compactc/format-compact
         if let Ok(home) = std::env::var("HOME") {
             let path = Path::new(&home).join("compactc").join("format-compact");
             if path.exists() {
@@ -52,15 +70,17 @@ impl FormatterEngine {
             }
         }
 
-        // 3. Check PATH
+        // 4. Check PATH
         if let Ok(output) = std::process::Command::new("which")
             .arg("format-compact")
             .output()
         {
             if output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                tracing::info!("Found formatter in PATH: {}", path);
-                return Some(path);
+                if !path.is_empty() {
+                    tracing::info!("Found formatter in PATH: {}", path);
+                    return Some(path);
+                }
             }
         }
 

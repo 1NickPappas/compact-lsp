@@ -10,6 +10,7 @@
 //! - Generated markdown doc files for go-to-definition
 
 use super::builtins::BuiltinDocLocation;
+use compact_analyzer::LanguageVersion;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -22,6 +23,9 @@ pub struct StdlibStruct {
     pub type_params: &'static str,
     pub description: &'static str,
     pub doc_url: &'static str,
+    /// Minimum language version required to use this symbol.
+    /// Empty means it is available in every version.
+    pub min_language_version: &'static str,
     pub fields: Vec<StdlibField>,
 }
 
@@ -41,6 +45,9 @@ pub struct StdlibCircuit {
     pub snippet: &'static str,
     pub doc: &'static str,
     pub doc_url: &'static str,
+    /// Minimum language version required to use this symbol.
+    /// Empty means it is available in every version.
+    pub min_language_version: &'static str,
 }
 
 // ── TOML deserialization structures ─────────────────────────────────
@@ -60,6 +67,8 @@ struct StructDef {
     description: String,
     #[serde(default)]
     doc_url: String,
+    #[serde(default)]
+    min_language_version: String,
     fields: Vec<FieldDef>,
 }
 
@@ -80,6 +89,8 @@ struct CircuitDef {
     doc: String,
     #[serde(default)]
     doc_url: String,
+    #[serde(default)]
+    min_language_version: String,
 }
 
 // ── Parsed + converted registry ─────────────────────────────────────
@@ -104,6 +115,7 @@ fn stdlib() -> &'static ParsedStdlib {
                 type_params: Box::leak(s.type_params.into_boxed_str()),
                 description: Box::leak(s.description.into_boxed_str()),
                 doc_url: Box::leak(s.doc_url.into_boxed_str()),
+                min_language_version: Box::leak(s.min_language_version.into_boxed_str()),
                 fields: s
                     .fields
                     .into_iter()
@@ -126,11 +138,30 @@ fn stdlib() -> &'static ParsedStdlib {
                 snippet: Box::leak(c.snippet.into_boxed_str()),
                 doc: Box::leak(c.doc.into_boxed_str()),
                 doc_url: Box::leak(c.doc_url.into_boxed_str()),
+                min_language_version: Box::leak(c.min_language_version.into_boxed_str()),
             })
             .collect();
 
         ParsedStdlib { structs, circuits }
     })
+}
+
+// ── Version gating ──────────────────────────────────────────────────
+
+/// Whether an entry with the given `min_language_version` is available for a
+/// detected `language` version.
+///
+/// An empty minimum, an unparseable minimum, or an unknown detected version
+/// (no compiler) all mean "available". The LSP errs toward showing symbols
+/// rather than hiding them when it cannot verify the target version.
+pub(crate) fn is_available(min_language_version: &str, language: Option<LanguageVersion>) -> bool {
+    if min_language_version.is_empty() {
+        return true;
+    }
+    match (LanguageVersion::parse(min_language_version), language) {
+        (Some(min), Some(detected)) => detected >= min,
+        _ => true,
+    }
 }
 
 // ── Lookup API ──────────────────────────────────────────────────────
@@ -145,6 +176,24 @@ pub fn find_stdlib_circuit(name: &str) -> Option<&'static StdlibCircuit> {
     stdlib().circuits.iter().find(|c| c.name == name)
 }
 
+/// Find a stdlib struct by name, respecting the detected language version.
+pub fn find_stdlib_struct_for(
+    name: &str,
+    language: Option<LanguageVersion>,
+) -> Option<&'static StdlibStruct> {
+    let st = find_stdlib_struct(name)?;
+    is_available(st.min_language_version, language).then_some(st)
+}
+
+/// Find a stdlib circuit by name, respecting the detected language version.
+pub fn find_stdlib_circuit_for(
+    name: &str,
+    language: Option<LanguageVersion>,
+) -> Option<&'static StdlibCircuit> {
+    let circ = find_stdlib_circuit(name)?;
+    is_available(circ.min_language_version, language).then_some(circ)
+}
+
 /// Return all stdlib struct types.
 pub fn all_stdlib_structs() -> &'static [StdlibStruct] {
     &stdlib().structs
@@ -153,6 +202,22 @@ pub fn all_stdlib_structs() -> &'static [StdlibStruct] {
 /// Return all stdlib circuit functions.
 pub fn all_stdlib_circuits() -> &'static [StdlibCircuit] {
     &stdlib().circuits
+}
+
+/// Return stdlib struct types available for the detected language version.
+pub fn all_stdlib_structs_for(language: Option<LanguageVersion>) -> Vec<&'static StdlibStruct> {
+    all_stdlib_structs()
+        .iter()
+        .filter(|s| is_available(s.min_language_version, language))
+        .collect()
+}
+
+/// Return stdlib circuit functions available for the detected language version.
+pub fn all_stdlib_circuits_for(language: Option<LanguageVersion>) -> Vec<&'static StdlibCircuit> {
+    all_stdlib_circuits()
+        .iter()
+        .filter(|c| is_available(c.min_language_version, language))
+        .collect()
 }
 
 // ── Doc file generation ─────────────────────────────────────────────
@@ -474,6 +539,34 @@ mod tests {
         let loc = loc.unwrap();
         assert!(loc.uri.ends_with("StdlibCircuits.md"));
         assert!(loc.line > 0);
+    }
+
+    #[test]
+    fn test_version_gating_hides_keccak_on_023_0() {
+        let mainnet = LanguageVersion::new(0, 23, 0);
+        let newer = LanguageVersion::new(0, 23, 103);
+
+        // keccak256 was added in language 0.23.103.
+        assert!(find_stdlib_circuit_for("keccak256", Some(mainnet)).is_none());
+        assert!(find_stdlib_circuit_for("keccak256", Some(newer)).is_some());
+
+        // Stable symbols remain visible on 0.23.0.
+        assert!(find_stdlib_circuit_for("persistentHash", Some(mainnet)).is_some());
+        assert!(find_stdlib_struct_for("JubjubPoint", Some(mainnet)).is_some());
+
+        // Unknown version (no compiler) does not filter.
+        assert!(find_stdlib_circuit_for("keccak256", None).is_some());
+    }
+
+    #[test]
+    fn test_version_gating_listing() {
+        let mainnet = LanguageVersion::new(0, 23, 0);
+        let listed = all_stdlib_circuits_for(Some(mainnet));
+        assert!(!listed.iter().any(|c| c.name == "keccak256"));
+        assert!(listed.iter().any(|c| c.name == "persistentHash"));
+
+        let all = all_stdlib_circuits_for(None);
+        assert!(all.iter().any(|c| c.name == "keccak256"));
     }
 
     #[test]

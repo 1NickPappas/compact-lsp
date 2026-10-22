@@ -12,6 +12,7 @@
 pub mod diagnostics;
 pub mod formatter;
 pub mod parser;
+pub mod version;
 
 pub use diagnostics::DiagnosticEngine;
 pub use formatter::FormatterEngine;
@@ -20,3 +21,4 @@ pub use parser::{
     ImportInfo, MemberAccessContext, ParameterInfo, ParserEngine, ReferenceLocation, SemanticToken,
     SemanticTokenModifier, SemanticTokenType, SignatureInfo, SymbolLocation, SyntaxError,
 };
+pub use version::LanguageVersion;
