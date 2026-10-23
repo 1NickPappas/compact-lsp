@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Grammar-schema validation test** — the parser's node-kind and field references are checked
+  against the linked `tree-sitter-compact` schema, so a grammar rename/removal fails `cargo test`
+  instead of silently degrading features.
+- **Automated crates.io publishing** (`publish.yml`) — a `v*` tag verifies the workspace, then
+  publishes `compact-analyzer` followed by `compact-lsp`.
+
+### Changed
+- Depend on the published crates.io crate **`tree-sitter-compact`** (0.2.0) instead of a git branch
+  on the archived `midnightntwrk/compact-tree-sitter` repository.
+- README: removed the Neovim setup section; Related Projects lists only the maintained
+  tree-sitter grammar.
+
 ## [0.2.0] - 2026-10-22
 
 ### Added
