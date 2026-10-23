@@ -88,6 +88,16 @@ awk -v ver="$VERSION" '
 ' Cargo.toml > Cargo.toml.tmp
 mv Cargo.toml.tmp Cargo.toml
 
+# Keep the internal dependency version in sync (crates.io requires the
+# dependency to exist at that exact version when compact-lsp is published).
+awk -v ver="$VERSION" '
+    /compact-analyzer = \{ path = "\.\.\/compact-analyzer", version = "/ {
+        sub(/version = "[^"]+"/, "version = \"" ver "\"")
+    }
+    { print }
+' crates/compact-lsp/Cargo.toml > crates/compact-lsp/Cargo.toml.tmp
+mv crates/compact-lsp/Cargo.toml.tmp crates/compact-lsp/Cargo.toml
+
 awk -v ver="$VERSION" -v date="$DATE" '
     /^## \[Unreleased\]/ { print; print ""; print "## [" ver "] - " date; next }
     { print }
@@ -97,7 +107,7 @@ mv CHANGELOG.md.tmp CHANGELOG.md
 # Refresh Cargo.lock for the new workspace version.
 cargo metadata --format-version 1 >/dev/null
 
-git add Cargo.toml Cargo.lock CHANGELOG.md
+git add Cargo.toml Cargo.lock CHANGELOG.md crates/compact-lsp/Cargo.toml
 git commit -m "release: v$VERSION"
 git tag -a "$TAG" -m "compact-lsp $TAG"
 

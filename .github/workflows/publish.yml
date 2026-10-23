@@ -1,0 +1,124 @@
+name: Publish crates
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Validate packaging only (does not upload)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CRATES_UA: "compact-lsp-publish (https://github.com/1NickPappas/compact-lsp)"
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # A tag push must match the workspace version (tag vX.Y.Z <-> Cargo.toml X.Y.Z).
+      - name: Check tag matches the workspace version
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          version="$(awk '/^\[workspace\.package\]/{f=1;next} f&&/^version = /{gsub(/[" ]/,"",$3);print $3;exit}' Cargo.toml)"
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match workspace version v$version"
+            exit 1
+          fi
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-features
+
+  publish:
+    name: Publish to crates.io
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: crates
+      url: https://crates.io/crates/compact-lsp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      - name: Resolve workspace version
+        id: version
+        run: |
+          version="$(awk '/^\[workspace\.package\]/{f=1;next} f&&/^version = /{gsub(/[" ]/,"",$3);print $3;exit}' Cargo.toml)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing version $version"
+
+      - name: Dry run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+        run: cargo publish -p compact-analyzer --dry-run
+
+      # crates.io rejects git dependencies and requires workspace members to be
+      # published in dependency order: compact-analyzer before compact-lsp.
+      - name: Publish compact-analyzer
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          if curl -sf -A "$CRATES_UA" "https://crates.io/api/v1/crates/compact-analyzer/$v" >/dev/null; then
+            echo "compact-analyzer $v is already published; skipping"
+          else
+            cargo publish -p compact-analyzer
+          fi
+
+      - name: Wait for compact-analyzer to appear on crates.io
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          for i in $(seq 1 30); do
+            if curl -sf -A "$CRATES_UA" "https://crates.io/api/v1/crates/compact-analyzer/$v" >/dev/null; then
+              echo "compact-analyzer $v is available"
+              exit 0
+            fi
+            echo "waiting for compact-analyzer $v on the index ($i/30)"
+            sleep 10
+          done
+          echo "::error::timed out waiting for compact-analyzer $v"
+          exit 1
+
+      - name: Publish compact-lsp
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          if curl -sf -A "$CRATES_UA" "https://crates.io/api/v1/crates/compact-lsp/$v" >/dev/null; then
+            echo "compact-lsp $v is already published; skipping"
+            exit 0
+          fi
+          # The index can lag the API briefly; retry a few times.
+          for i in 1 2 3 4 5; do
+            if cargo publish -p compact-lsp; then
+              exit 0
+            fi
+            echo "retry $i for compact-lsp $v"
+            sleep 15
+          done
+          echo "::error::failed to publish compact-lsp $v"
+          exit 1
