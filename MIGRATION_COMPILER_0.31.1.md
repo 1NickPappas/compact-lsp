@@ -49,9 +49,11 @@ Sources: `docs.midnight.network/relnotes/support-matrix.md`,
    - (`jubjubSchnorrVerify`, `ecNeg` are 0.23.104/105 and are *not* yet in the registries — no action needed.)
 3. **No version-aware gating.** Completion/hover/definition present registry symbols
    unconditionally, so a 0.31.1 user sees symbols their compiler rejects.
-4. **Grammar pin is a temporary necessity.** `tree-sitter-compact` `feat/grammar-v0.30.0`
-   is the only 0.23-capable grammar and is unmerged upstream. Keep the pin and its revert
-   note (see `CLAUDE.md`).
+4. **Grammar comes from an archived upstream.** `midnightntwrk/compact-tree-sitter` is archived.
+   The LSP now depends on the crates.io crate **`tree-sitter-compact`** (maintained fork
+   `1NickPappas/compact-tree-sitter`), which fixes both the build-host risk and the publish
+   blocker. The parser accepts both node-naming schemes (`type_decl`/`type_alias_declaration`,
+   `const_binding`/`cbinding`).
 5. **`main` is stale.** All 0.23 work lives on `dev`.
 
 **No syntax/AST changes are required for 0.31.1** — grammar and parser already cover
@@ -97,8 +99,9 @@ language 0.23.0.
 The fallback (remove `keccak256` outright) was not needed.
 
 ### Step 5 — Verify grammar/parser coverage ✅ done
-- [x] The pinned `feat/grammar-v0.30.0` grammar covers 0.23.0 syntax; the probe tests (Step 6)
-      confirm the parser and compiler agree on the symbol set. No new fixtures were required.
+- [x] The crates.io `tree-sitter-compact` grammar covers 0.23.0 syntax (verified by parsing the
+      0.31.1 standard library and a 0.23 syntax probe with 0 errors); the probe tests (Step 6)
+      confirm the parser and compiler agree on the symbol set.
 
 ### Step 6 — Diagnostics compatibility + probe test ✅ done
 - [x] `compactc.bin --vscode --skip-zk <file> <tmp>` stderr format is unchanged on 0.31.1.
@@ -146,8 +149,9 @@ the probe tests skip there when no compiler is present.
 - [ ] Handle breaking stdlib changes: points no longer nominal aliases;
       `JubjubScalar`/`Secp256k1Base`/`Secp256k1Scalar` must be imported;
       `secp256k1EcdsaRecover` and field `add`/`mul` removed; ZKIR v3 default.
-- [ ] Requires an updated `compact-tree-sitter` grammar (none published past
-      `feat/grammar-v0.30.0` yet) — track upstream for a new branch.
+- [ ] Requires extending the maintained grammar (`1NickPappas/compact-tree-sitter`, published as
+      `tree-sitter-compact`) for any new 0.26/0.27 syntax; most ledger-9 additions are stdlib/runtime,
+      not syntax (verified: the current grammar parses the 0.27 standard library).
 
 ## 5. Functionality changes we want to support
 
@@ -172,7 +176,7 @@ registry must stop advertising symbols the mainnet compiler does not have.
 |---|---|
 | `LFDT-Minokawa/compact` | `CHANGELOG.md`, `compiler/standard-library.compact`, `doc/compact-reference.mdx`, `doc/release-notes/toolchain-*.md` |
 | `midnightntwrk/compact` | GitHub Releases (binary zips + notes), `prerelease/` |
-| `midnightntwrk/compact-tree-sitter` | `feat/grammar-v0.30.0` branch; watch for a new grammar line |
+| `1NickPappas/compact-tree-sitter` (crates.io `tree-sitter-compact`) | Maintained grammar; the upstream `midnightntwrk` repo is archived |
 | `docs.midnight.network/relnotes/compact` | Release-notes overview (`.md` suffix) |
 | `docs.midnight.network/relnotes/support-matrix.md` | Which toolchain the public networks pin |
 

@@ -13,7 +13,7 @@ Completed:
 - ✅ **Parser node-kind correctness bugs** (`f062c71`) — `const_binding`→`const_stmt`, removed dead `let_binding`/`call_args` arms, fixed `rtype`→`type` return-type field; regression tests added.
 - ✅ **Stdlib / keyword accuracy → language 0.23.103** (`907d36e`, `676c505`, `5a74533`, `19d8e47`) — snake_case fields; `Coin*`→`Shielded*`; `CurvePoint`→`JubjubPoint`; unshielded-token family + `UserAddress`; Kernel `mintShielded`/`mintUnshielded` + `balance*`/`claimUnshieldedCoinSpend`/`incUnshielded*`; keyword list (`type`/`new`/`from`/`slice`, dropped `while`/`let`/`public`/`private`); dropped stale `Void`/`Address`; added `keccak256`. Verified by compiling a probe contract with compactc 0.23.0.
 - ✅ **Pre-existing fixes** — block-comment doc extraction (`ac0080b`), repo reformat + `rust-toolchain.toml` pin to 1.91.1 (`9bd2151`, `8a9f1e3`), `redundant_closure` fix (`d872a1f`).
-- ✅ **Track A — 0.23-capable grammar** (`683627f`) — pinned `tree-sitter-compact` to `feat/grammar-v0.30.0`; migrated the parser (`const_stmt`→`cbinding`, removed `edecl`, type-alias in outline); 0.23 parse smoke test. **Temporary pin** — revert to `branch = "main"` once that branch merges upstream (see `CLAUDE.md`).
+- ✅ **Track A — 0.23-capable grammar** (`683627f`) — migrated the parser (`const_stmt` bindings, `edecl` removed, type-alias in outline); 0.23 parse smoke test. The grammar now comes from the **crates.io `tree-sitter-compact` crate** (maintained fork); the parser accepts both node-naming schemes (`type_decl`/`type_alias_declaration`, `const_binding`/`cbinding`).
 - ✅ **Track B Phase 1** (`a23f9c8`) — `workspace/symbol` (filters `symbol_cache`), index caches on `did_open`, surface compiler/language version on startup.
 - ✅ **Track C fast wins** (`216d700`) — dropped `Cell` from type completion (not a writable type); consolidated the duplicated `is_builtin_type` into a single source in `compact-analyzer`.
 
@@ -31,16 +31,15 @@ Completed:
   - `doc/ledger-adt.mdx` — ledger ADT (Kernel/Cell/Counter/Set/Map/List/MerkleTree) methods
   - `CHANGELOG.md` — authoritative per-toolchain language/stdlib history (replaces the discontinued `CHANGELOG_compactc.md`)
 - Release notes: `https://docs.midnight.network/relnotes/compact` (use the `.md` suffix); support matrix: `https://docs.midnight.network/relnotes/support-matrix.md`.
-- `compact-tree-sitter` — `grammar.js`, `src/node-types.json`. The LSP currently pins the `feat/grammar-v0.30.0` branch (0.23-capable); `main` is still the older line-comments-only grammar until the branch merges.
+- `compact-tree-sitter` — `grammar.js`, `src/node-types.json`, maintained at `1NickPappas/compact-tree-sitter` and published as the crates.io crate `tree-sitter-compact`. The upstream `midnightntwrk` repo is archived.
 
 ---
 
 ## Track A — 0.23 grammar ✅ done (`683627f`)
 
-The LSP now pins `compact-tree-sitter` `feat/grammar-v0.30.0` (`Cargo.toml:72`), which parses all 0.23 syntax (`slice`, `new type` aliases, selective imports, block comments, hex/oct/bin literals, `$`-identifiers, multi-binding `const`). Parser migrated (`const_stmt`→`cbinding`, `edecl` removed, type-alias added to the outline) with a parse smoke test.
+The LSP depends on the crates.io crate `tree-sitter-compact = "0.1.0"` (`Cargo.toml`), which parses all 0.23 syntax (`slice`, `new type` aliases, selective imports, block comments, hex/oct/bin literals, `$`-identifiers, multi-binding `const`). Parser migrated (`const_stmt` bindings, `edecl` removed, type-alias added to the outline) with a parse smoke test.
 
 Remaining follow-ups:
-- **[Revert when merged]** when `feat/grammar-v0.30.0` lands on `compact-tree-sitter` `main`, switch the `Cargo.toml` pin back to `branch = "main"` and drop the `CLAUDE.md` temporary-pin note.
 - **[Add] deeper new-construct coverage** (deferred): hover + go-to-definition for `type_alias_declaration`; resolution of `import_selection`/`import_element` (selective imports) in imports extraction / goto / completion. Optional: semantic-token handling for `slice_term`, `assign_expr`, `assert_term`, array/bytes/spread literals.
 
 ---

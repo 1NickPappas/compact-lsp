@@ -110,7 +110,7 @@ GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` job that 
 ## Related Projects
 
 - [compact.vim](https://github.com/1NickPappas/compact.vim) - Vim/Neovim syntax highlighting
-- [compact-tree-sitter](https://github.com/midnightntwrk/compact-tree-sitter) - Tree-sitter grammar
+- [compact-tree-sitter](https://github.com/1NickPappas/compact-tree-sitter) - Tree-sitter grammar for Compact (published on crates.io as `tree-sitter-compact`; the original `midnightntwrk` repo is archived)
 
 ## Neovim Setup
 

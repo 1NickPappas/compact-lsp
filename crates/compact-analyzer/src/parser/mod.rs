@@ -102,7 +102,9 @@ impl ParserEngine {
                 (name, SymbolKind::ENUM, None)
             }
             // Type alias: [export] [new] type Name [<…>] = Type;  (language 0.23)
-            "type_alias_declaration" => {
+            // The crates.io `tree-sitter-compact` grammar names this `type_decl`;
+            // the old `feat/grammar-v0.30.0` branch names it `type_alias_declaration`.
+            "type_alias_declaration" | "type_decl" => {
                 let name = self.get_field_text(node, "name", source)?;
                 (name, SymbolKind::INTERFACE, Some("type".to_string()))
             }
@@ -1459,13 +1461,14 @@ impl ParserEngine {
                 }
             }
 
-            // Const bindings: `const <cbinding>, … ;` where each `cbinding`
-            // holds a `pattern` field (multi-binding `const a = 1, b = 2;`).
-            // There is no `let` in Compact.
+            // Const bindings: `const <binding>, … ;` where each binding holds a
+            // `pattern` field (multi-binding `const a = 1, b = 2;`). The crates.io
+            // grammar names the binding `const_binding`; the old
+            // `feat/grammar-v0.30.0` branch names it `cbinding`. There is no `let`.
             "const_stmt" => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "cbinding" {
+                    if matches!(child.kind(), "cbinding" | "const_binding") {
                         if let Some(pattern) = child.child_by_field_name("pattern") {
                             self.collect_binding_id_tokens(pattern, tokens);
                         }

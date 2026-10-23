@@ -24,8 +24,10 @@ This is a self-contained git repository. The `CLAUDE.md` in the parent `midnight
   and `doc/release-notes/toolchain-*.md` are the language/API references.
 - **Public release artifacts — `midnightntwrk/compact`**
   (<https://github.com/midnightntwrk/compact/releases>).
-- **Grammar — `midnightntwrk/compact-tree-sitter`**: the only branch supporting current
-  syntax is `feat/grammar-v0.30.0` (the pin above).
+- **Grammar — `tree-sitter-compact` on crates.io**, maintained at
+  <https://github.com/1NickPappas/compact-tree-sitter> (the upstream
+  `midnightntwrk/compact-tree-sitter` repo is archived). The LSP depends on the published
+  crate version, not a git branch.
 
 > **Gotcha:** compiler crate versions such as `0.31.103` (language `0.23.103`) are internal
 > build versions, **not released toolchains**. Do not assume they are installable or
@@ -61,7 +63,14 @@ The analysis layer, independent of the LSP protocol. Exposes three engines via `
 - **`FormatterEngine`** (`formatter.rs`) — wraps the external `format-compact` binary.
 - **`ParserEngine`** (`parser/mod.rs`, ~2700 lines) — wraps `tree-sitter-compact` (pulled from git). This is the heart of every AST-driven feature: document symbols, folding, hover, go-to-definition, signature help, completion symbols, import extraction, syntax errors, semantic tokens, and find-references. Operations take `&mut self` (the tree-sitter `Parser` is mutable).
 
-> **Temporary grammar pin (revisit):** `Cargo.toml` pins `tree-sitter-compact` to the unmerged branch **`feat/grammar-v0.30.0`** because it's the only grammar that parses language 0.23 syntax (`slice`, `new type` aliases, `{…} from` selective imports, block comments, hex/oct/bin literals, `$`-identifiers). **Switch back to `branch = "main"` once that branch merges upstream** — check `compact-tree-sitter` `main` vs `feat/grammar-v0.30.0` periodically. The parser was migrated for this grammar (no `edecl`; `const_stmt` wraps `cbinding`). Deferred follow-up: hover/go-to-definition for `type_alias_declaration` and resolution of `import_selection` selective imports.
+> **Grammar source:** `Cargo.toml` depends on the crates.io crate **`tree-sitter-compact`**
+> (maintained at `1NickPappas/compact-tree-sitter`; the upstream `midnightntwrk` repo is
+> archived). It is the 0.23.0/0.31.1 grammar. The parser accepts **both node-naming schemes**:
+> `type_alias_declaration` | `type_decl`, and `cbinding` | `const_binding` (the published crate
+> uses `type_decl`/`const_binding`; the old `feat/grammar-v0.30.0` branch used the others).
+> To update: bump the version in `Cargo.toml`, run `cargo update -p tree-sitter-compact`, then
+> `cargo test`. Deferred follow-up: hover/go-to-definition for type aliases and resolution of
+> `import_selection` selective imports.
 
 ### `crates/compact-lsp` (binary)
 

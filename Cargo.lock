@@ -888,7 +888,8 @@ dependencies = [
 [[package]]
 name = "tree-sitter-compact"
 version = "0.1.0"
-source = "git+https://github.com/midnightntwrk/compact-tree-sitter?branch=feat%2Fgrammar-v0.30.0#22de6ee9dbf4b92fe4e2fe3602e53f1e352b79fd"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "142dbff275837d08d5999fba1bdfc179c58b94404a0e4812263566c3753b8a7c"
 dependencies = [
  "cc",
  "tree-sitter-language",

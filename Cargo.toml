@@ -68,9 +68,8 @@ tempfile = "3"
 toml = "0.8"
 
 # Tree-sitter for parsing.
-# NOTE: temporarily pinned to the unmerged `feat/grammar-v0.30.0` branch, which
-# is the grammar that supports language 0.23 syntax (slice, type aliases,
-# selective imports, block comments, etc.). Switch back to `branch = "main"`
-# once that branch merges upstream. See crates/compact-lsp/CLAUDE.md.
+# Grammar comes from crates.io (`tree-sitter-compact`), maintained from
+# https://github.com/1NickPappas/compact-tree-sitter. This replaces the git
+# dependency on the archived midnightntwrk/compact-tree-sitter repo.
 tree-sitter = "0.25"
-tree-sitter-compact = { git = "https://github.com/midnightntwrk/compact-tree-sitter", branch = "feat/grammar-v0.30.0" }
+tree-sitter-compact = "0.1.0"
