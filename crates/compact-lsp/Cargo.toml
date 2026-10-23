@@ -3,6 +3,9 @@ name = "compact-lsp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 # This tells Cargo to build a binary called "compact-lsp"
 [[bin]]
@@ -40,5 +43,5 @@ tempfile.workspace = true
 # TOML parsing for data-driven registries
 toml.workspace = true
 
-# Our diagnostic engine crate
-compact-analyzer = { path = "../compact-analyzer" }
+# Our diagnostic engine crate (version is required for `cargo publish`)
+compact-analyzer = { path = "../compact-analyzer", version = "0.2.0" }
