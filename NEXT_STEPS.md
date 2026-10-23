@@ -37,7 +37,7 @@ Completed:
 
 ## Track A — 0.23 grammar ✅ done (`683627f`)
 
-The LSP depends on the crates.io crate `tree-sitter-compact = "0.1.0"` (`Cargo.toml`), which parses all 0.23 syntax (`slice`, `new type` aliases, selective imports, block comments, hex/oct/bin literals, `$`-identifiers, multi-binding `const`). Parser migrated (`const_stmt` bindings, `edecl` removed, type-alias added to the outline) with a parse smoke test.
+The LSP depends on the crates.io crate `tree-sitter-compact = "0.2.0"` (`Cargo.toml`), the compiler-aligned 0.31.1 grammar, which parses all 0.23 syntax (`slice`, `new type` aliases, selective imports, block comments, hex/oct/bin literals, `$`-identifiers, multi-binding `const`). Parser migrated (`const_stmt` bindings, `edecl` removed, type-alias added to the outline) with a parse smoke test.
 
 Remaining follow-ups:
 - **[Add] deeper new-construct coverage** (deferred): hover + go-to-definition for `type_alias_declaration`; resolution of `import_selection`/`import_element` (selective imports) in imports extraction / goto / completion. Optional: semantic-token handling for `slice_term`, `assign_expr`, `assert_term`, array/bytes/spread literals.
