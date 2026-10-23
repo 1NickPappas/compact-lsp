@@ -109,67 +109,7 @@ GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` job that 
 
 ## Related Projects
 
-- [compact.vim](https://github.com/1NickPappas/compact.vim) - Vim/Neovim syntax highlighting
-- [compact-tree-sitter](https://github.com/1NickPappas/compact-tree-sitter) - Tree-sitter grammar for Compact (published on crates.io as `tree-sitter-compact`; the original `midnightntwrk` repo is archived)
-
-## Neovim Setup
-
-### 1. Create LSP config
-
-Create `~/.config/nvim/lua/lsp/compact.lua`:
-
-```lua
-return {
-    cmd = { vim.fn.expand("~/path/to/compact-lsp/target/release/compact-lsp") },
-    filetypes = { "compact" },
-    root_markers = { ".git", "compact.toml", "package.json" },
-}
-```
-
-### 2. Register filetype and enable LSP
-
-Add to your Neovim config:
-
-```lua
--- Register .compact filetype
-vim.filetype.add({
-    extension = { compact = "compact" },
-})
-
--- Load and register compact LSP
-local compact_config = require("lsp.compact")
-vim.lsp.config("compact_lsp", compact_config)
-
--- Auto-enable for .compact files
-vim.api.nvim_create_autocmd("FileType", {
-    pattern = "compact",
-    callback = function()
-        vim.lsp.enable("compact_lsp")
-    end,
-})
-```
-
-### 3. Verify
-
-Open a `.compact` file and run:
-```vim
-:LspInfo
-```
-
-### Optional: Enable semantic highlighting
-
-Add to your config to use LSP semantic tokens for highlighting:
-
-```lua
-vim.api.nvim_create_autocmd("LspAttach", {
-    callback = function(args)
-        local client = vim.lsp.get_client_by_id(args.data.client_id)
-        if client and client.server_capabilities.semanticTokensProvider then
-            vim.lsp.semantic_tokens.start(args.buf, args.data.client_id)
-        end
-    end,
-})
-```
+- [compact-tree-sitter](https://github.com/1NickPappas/compact-tree-sitter) - Tree-sitter grammar for Compact (published on crates.io as `tree-sitter-compact`)
 
 ## License
 
