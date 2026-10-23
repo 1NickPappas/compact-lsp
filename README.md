@@ -3,6 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/1NickPappas/compact-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/1NickPappas/compact-lsp/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![crates.io](https://img.shields.io/crates/v/compact-lsp.svg)](https://crates.io/crates/compact-lsp)
+[![Downloads](https://img.shields.io/crates/d/compact-lsp.svg)](https://crates.io/crates/compact-lsp)
+[![docs.rs](https://docs.rs/compact-analyzer/badge.svg)](https://docs.rs/compact-analyzer)
 
 This project extends the Midnight Network with additional developer tooling.
 
@@ -69,13 +72,30 @@ shown. Upstream release notes: <https://docs.midnight.network/relnotes/compact>;
 and migration notes: [`MIGRATION_COMPILER_0.31.1.md`](./MIGRATION_COMPILER_0.31.1.md) and
 [`CLAUDE.md`](./CLAUDE.md).
 
-## Building
+## Install
+
+Install the language server from crates.io:
+
+```bash
+cargo install compact-lsp
+```
+
+Prebuilt binaries for Linux, macOS (Intel + Apple silicon), and Windows are on the
+[releases page](https://github.com/1NickPappas/compact-lsp/releases).
+
+Or build from source:
 
 ```bash
 cargo build --release
+# binary at target/release/compact-lsp
 ```
 
-Binary: `target/release/compact-lsp`
+Two crates are published:
+
+| Crate | What it is | Docs |
+|---|---|---|
+| [`compact-lsp`](https://crates.io/crates/compact-lsp) | the language server binary (`cargo install compact-lsp`) | — |
+| [`compact-analyzer`](https://crates.io/crates/compact-analyzer) | reusable analysis library (diagnostics, formatter, parser) | [docs.rs](https://docs.rs/compact-analyzer) |
 
 ## Compiler Location
 
