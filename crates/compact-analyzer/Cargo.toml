@@ -38,3 +38,7 @@ tracing.workspace = true
 # Tree-sitter for parsing
 tree-sitter.workspace = true
 tree-sitter-compact.workspace = true
+
+[dev-dependencies]
+# Used by the grammar-schema validation test.
+serde_json.workspace = true

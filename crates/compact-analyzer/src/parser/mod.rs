@@ -2076,6 +2076,73 @@ export circuit demo(data: Bytes<32>): Bytes<16> {
         );
     }
 
+    /// Validation step for grammar bumps: every node kind the parser compares
+    /// with `.kind()` (and every `child_by_field_name`) must exist in the linked
+    /// `tree-sitter-compact` schema. Fails loudly if a grammar rename/removal
+    /// slips in, instead of silently degrading editor features.
+    ///
+    /// A few **legacy** node kinds are intentionally kept so the parser works
+    /// with both the old and new grammar schemes; they are listed below.
+    #[test]
+    fn test_parser_references_exist_in_grammar_schema() {
+        use std::collections::HashSet;
+
+        // Names kept for the older grammar scheme; not in the current schema.
+        const LEGACY_NODE_KINDS: &[&str] = &["cbinding", "type_decl"];
+
+        let schema: serde_json::Value =
+            serde_json::from_str(tree_sitter_compact::NODE_TYPES).expect("valid node-types.json");
+        let nodes = schema.as_array().expect("node-types.json is an array");
+
+        let named: HashSet<&str> = nodes
+            .iter()
+            .filter_map(|n| n.get("type").and_then(|t| t.as_str()))
+            .collect();
+        let mut fields: HashSet<&str> = HashSet::new();
+        for n in nodes {
+            if let Some(obj) = n.get("fields").and_then(|f| f.as_object()) {
+                fields.extend(obj.keys().map(String::as_str));
+            }
+        }
+
+        let src = include_str!("mod.rs");
+
+        // Node kinds compared with `.kind() ==` or `matches!(... .kind(), …)`.
+        let re_eq = regex::Regex::new(r#"\.kind\(\)\s*==\s*"([a-z_][a-z0-9_]*)""#).unwrap();
+        let re_matches = regex::Regex::new(r"(?s)matches!\([^;]*?\.kind\(\),\s*([^)]*)\)").unwrap();
+        let re_quoted = regex::Regex::new(r#""([a-z_][a-z0-9_]*)""#).unwrap();
+
+        let mut kinds: HashSet<String> =
+            re_eq.captures_iter(src).map(|c| c[1].to_string()).collect();
+        for cap in re_matches.captures_iter(src) {
+            kinds.extend(re_quoted.captures_iter(&cap[1]).map(|c| c[1].to_string()));
+        }
+
+        let missing_kinds: Vec<&String> = kinds
+            .iter()
+            .filter(|k| !named.contains(k.as_str()) && !LEGACY_NODE_KINDS.contains(&k.as_str()))
+            .collect();
+        assert!(
+            missing_kinds.is_empty(),
+            "parser references node kinds absent from the grammar schema: {missing_kinds:?}"
+        );
+
+        // Field names read via `child_by_field_name(...)`.
+        let re_field = regex::Regex::new(r#"child_by_field_name\("([a-z_][a-z0-9_]*)"\)"#).unwrap();
+        let field_refs: HashSet<String> = re_field
+            .captures_iter(src)
+            .map(|c| c[1].to_string())
+            .collect();
+        let missing_fields: Vec<&String> = field_refs
+            .iter()
+            .filter(|f| !fields.contains(f.as_str()))
+            .collect();
+        assert!(
+            missing_fields.is_empty(),
+            "parser references fields absent from the grammar schema: {missing_fields:?}"
+        );
+    }
+
     #[test]
     fn test_completion_symbols() {
         let mut parser = ParserEngine::new();

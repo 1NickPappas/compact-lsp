@@ -58,6 +58,7 @@ dependencies = [
  "anyhow",
  "ls-types",
  "regex",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
