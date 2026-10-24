@@ -6,7 +6,7 @@ Each remaining item is tagged **[Add] / [Update] / [Remove]** with the file to t
 
 ## Status
 
-**Target: Compact toolchain 0.31.1 = language 0.23.0** (the Mainnet/Preprod/Preview pin; see `MIGRATION_COMPILER_0.31.1.md`). The registry tracks the 0.23.x source line but **gates** symbols added after 0.23.0 (`min_language_version`), so the mainnet compiler is never offered a symbol it rejects. 0.34.0/0.35.0 (language 0.26/0.27, ledger 9) are not deployable to public networks.
+**Supported: Compact language 0.23.0 – 0.27.0, toolchains 0.31.1 – 0.35.0.** The public-network pin is **0.31.1 = language 0.23.0** (Mainnet/Preprod/Preview; see `MIGRATION_COMPILER_0.31.1.md`). The registry carries `min_language_version` (and an exclusive `max_language_version` for removals), so the mainnet compiler is never offered a symbol it rejects while newer toolchains get their own symbols. 0.34.0/0.35.0 (language 0.26/0.27, ledger 9) are not deployable to public networks yet.
 
 Completed:
 - ✅ **0.31.1 migration** (`migrate/0.31.1`) — compiler discovery now resolves the Compact devtools active toolchain; registries gate by detected language version; probe tests compile against the detected compiler. Details in `MIGRATION_COMPILER_0.31.1.md`.
@@ -65,6 +65,8 @@ Remaining:
 - ✅ **`keccak256` gating** — resolved by version-aware `min_language_version` gating: hidden on the mainnet language 0.23.0 compiler (toolchain 0.31.1), offered on 0.23.103+. The LSP is no longer "ahead of the installed compiler".
 - ✅ **Probe-compile drift check** — the `compiler-probe` CI job installs toolchain 0.31.1 and runs the `diagnostics.rs` probe tests (stable-symbol coverage + keccak256 gate consistency). They self-skip when no compiler is present.
 - **[Add] Outdated-dependency watcher** — a scheduled workflow (like `upstream-watch`) that files an issue when a direct Cargo dependency is behind the latest stable release (source: `cargo outdated` or the crates.io API).
+- ✅ **Compact 0.34/0.35 (language 0.26/0.27) registry support** — grammar bumped to `tree-sitter-compact` 0.3.0; added `PublicAddress`, `kernel.caller()`, `sha512`, `jubjubSchnorrVerify`, `secp256r1EcdsaVerify`, `ed25519Verify`, the secp256r1/Curve25519 types, and `contract implements`/`emit` handling; added `max_language_version` gating; CI probes 0.31.1/0.34.0/0.35.0.
+- **[TODO] Cross-contract-call intelligence (Phase 3)** — resolve `contract implements C;`, and give contract references (`ref.circuit(...)`) completion/hover/go-to-definition/signature help across files.
 
 ---
 

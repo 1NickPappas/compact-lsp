@@ -710,6 +710,7 @@ impl LanguageServer for CompactLanguageServer {
                                     SemanticTokenType::VARIABLE,
                                     SemanticTokenType::NAMESPACE,
                                     SemanticTokenType::TYPE_PARAMETER,
+                                    SemanticTokenType::KEYWORD,
                                 ],
                                 token_modifiers: vec![
                                     SemanticTokenModifier::DECLARATION,
@@ -1014,6 +1015,8 @@ impl LanguageServer for CompactLanguageServer {
             ("circuit", "Define a circuit function"),
             ("witness", "Declare a witness function"),
             ("contract", "Declare an external contract"),
+            ("implements", "Assert a contract implements a contract type"),
+            ("emit", "Emit a Zswap effect"),
             ("struct", "Define a struct type"),
             ("enum", "Define an enum type"),
             ("constructor", "Define a constructor"),
@@ -1273,6 +1276,18 @@ impl LanguageServer for CompactLanguageServer {
                 "export contract snippet",
                 "export contract ${1:Name} {\n\tcircuit ${2:fn}(${3:params}): ${4:ReturnType};\n}",
                 "Exported contract declaration template",
+            ),
+            (
+                "contract implements",
+                "contract implements snippet",
+                "contract implements ${1:ContractType};",
+                "Assert this contract implements a contract type",
+            ),
+            (
+                "emit",
+                "emit snippet",
+                "emit(${1:effect});",
+                "Emit a Zswap effect from a circuit",
             ),
             // Module snippets
             (

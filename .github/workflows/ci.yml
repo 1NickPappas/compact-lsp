@@ -35,8 +35,14 @@ jobs:
         run: cargo test --all-features
 
   compiler-probe:
-    name: Compiler probe (toolchain 0.31.1)
+    name: Compiler probe (toolchain ${{ matrix.compact }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mainnet pin plus the ledger-9 release candidates. Each toolchain
+        # probes the symbols that its language version should support.
+        compact: ['0.31.1', '0.34.0', '0.35.0']
     steps:
       - uses: actions/checkout@v4
 
@@ -49,12 +55,12 @@ jobs:
       # The registry probe tests skip themselves when no compiler is found.
       # Install the mainnet toolchain so they actually run and catch
       # registry-vs-compiler drift.
-      - name: Install Compact devtools and toolchain 0.31.1
+      - name: Install Compact devtools and toolchain ${{ matrix.compact }}
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
             https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/compact" update 0.31.1
+          "$HOME/.local/bin/compact" update ${{ matrix.compact }}
           "$HOME/.local/bin/compact" compile --version
           "$HOME/.local/bin/compact" compile --language-version
 

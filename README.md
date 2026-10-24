@@ -13,7 +13,9 @@ This project extends the Midnight Network with additional developer tooling.
 
 Language Server Protocol implementation for the [Compact](https://docs.midnight.network/compact/reference/compact-reference) smart contract language (Midnight network).
 
-Targets **Compact toolchain 0.31.1 (language 0.23.0)** — the compiler pinned by Midnight Mainnet, Preprod, and Preview.
+Supports **Compact language 0.23.0 – 0.27.0** (toolchains **0.31.1 – 0.35.0**). The
+Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35.0
+(language 0.26 / 0.27, ledger 9) are supported for the upcoming network upgrade.
 
 ## Features
 
@@ -52,8 +54,9 @@ Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, rename, signature 
 ## Requirements
 
 - Rust toolchain (for building)
-- Compact devtools (`compact`) with toolchain **0.31.1** — install with `compact update 0.31.1`.
-  Provides `compactc` (diagnostics) and `format-compact` (formatting).
+- Compact devtools (`compact`) with a toolchain in **0.31.1 – 0.35.0** — install the one you
+  target with `compact update 0.31.1` (or `0.34.0` / `0.35.0`). Provides `compactc` (diagnostics)
+  and `format-compact` (formatting).
 
 ### Version support
 
@@ -66,10 +69,15 @@ both the mainnet compiler and newer toolchains:
 | 0.34.0 | 0.26.0 | 9 | ❌ |
 | 0.35.0 | 0.27.0 | 9 | ❌ |
 
-Symbols added after language 0.23.0 (e.g. `keccak256`, added in 0.23.103) are hidden when the
-detected compiler rejects them. When no compiler is found, gating is disabled and all symbols are
-shown. Upstream release notes: <https://docs.midnight.network/relnotes/compact>; full version map
-and migration notes: [`MIGRATION_COMPILER_0.31.1.md`](./MIGRATION_COMPILER_0.31.1.md) and
+Registry entries carry a `min_language_version` and, for symbols removed in a later language
+version, an exclusive `max_language_version`. One registry therefore serves both the mainnet
+compiler and newer toolchains: a symbol is hidden when the detected compiler is below its minimum
+(e.g. `keccak256` on 0.23.0) or at/after a removal. When no compiler is found, gating is disabled
+and all symbols are shown. On toolchains where the ZKIR-v3 backend is opt-in
+(0.34.100 – 0.35.104), the LSP automatically passes `--feature-zkir-v3` so the foreign-curve
+symbols resolve. New syntax is supported too: `contract implements` and `emit(...)`.
+Upstream release notes: <https://docs.midnight.network/relnotes/compact>; full version map and
+migration notes: [`MIGRATION_COMPILER_0.31.1.md`](./MIGRATION_COMPILER_0.31.1.md) and
 [`CLAUDE.md`](./CLAUDE.md).
 
 ## Install

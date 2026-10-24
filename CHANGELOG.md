@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Compact 0.34/0.35 support** (language 0.26/0.27): registry entries for `PublicAddress`,
+  `kernel.caller()`, `sha512`, `jubjubSchnorrVerify`, `secp256r1EcdsaVerify`, `ed25519Verify`,
+  the secp256r1/Curve25519 field and point types, and their signature structs. All are
+  version-gated.
+- Hover docs, keyword completion, snippets, and semantic tokens for `contract implements` and
+  `emit(...)`.
+- Automatic `--feature-zkir-v3` detection on toolchains where the ZKIR-v3 backend is opt-in
+  (0.34.100–0.35.104), required for the foreign-curve symbols.
+- CI compiler-probe matrix over toolchains 0.31.1, 0.34.0, and 0.35.0.
+
+### Changed
+- Bumped the grammar to `tree-sitter-compact` 0.3.0 (language 0.23.0–0.27.0).
+- Registry gating now supports an exclusive `max_language_version` alongside
+  `min_language_version`, so symbols removed in later language versions can be hidden.
+- `emit` and `implements` are treated as keywords (the 0.35 compiler reserves them), and
+  semantic tokens gained a `keyword` type.
+
 ## [0.2.3] - 2026-10-24
 
 ### Changed

@@ -483,7 +483,13 @@ impl ParserEngine {
                 "**enum**\n\nDefines an enumeration type.\n\n```compact\nenum Color {\n  Red,\n  Green,\n  Blue,\n}\n```"
             }
             "contract" => {
-                "**contract**\n\nDeclares an external contract interface.\n\n```compact\ncontract Token {\n  circuit transfer(to: Address, amount: Uint<64>): Boolean;\n}\n```"
+                "**contract**\n\nDeclares an external contract interface (a *contract type*).\n\n```compact\ncontract Token {\n  circuit transfer(to: Address, amount: Uint<64>): Boolean;\n}\n```"
+            }
+            "implements" => {
+                "**implements**\n\nAsserts that the enclosing contract implements a contract type:\n\n```compact\ncontract implements Token;\n```\n\nThe compiler verifies that every circuit declared by the contract type is present with a matching signature. Requires language 0.26+."
+            }
+            "emit" => {
+                "**emit**\n\nEmits a Zswap effect from a circuit:\n\n```compact\nemit(ShieldedSpend { nullifier: disclose(n) });\n```\n\nRequires language 0.26+."
             }
             "constructor" => {
                 "**constructor**\n\nDefines the contract initialization function.\n\n```compact\nconstructor(initial_value: Field) {\n  ledger.value = initial_value;\n}\n```"
@@ -1533,6 +1539,17 @@ impl ParserEngine {
                 }
             }
 
+            // New language keywords from grammar 0.3.0. The grammar models
+            // these as anonymous literal children, so emit explicit keyword
+            // tokens for them.
+            "emit_term" => {
+                self.push_keyword_token(node, "emit", tokens);
+            }
+            "contract_implements_declaration" => {
+                self.push_keyword_token(node, "contract", tokens);
+                self.push_keyword_token(node, "implements", tokens);
+            }
+
             // Const bindings: `const <binding>, … ;` where each binding holds a
             // `pattern` field (multi-binding `const a = 1, b = 2;`). The crates.io
             // grammar names the binding `const_binding`; the old
@@ -1555,6 +1572,19 @@ impl ParserEngine {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.collect_semantic_tokens(child, source, tokens);
+        }
+    }
+
+    /// Push a `Keyword` semantic token for the direct child of `node` whose
+    /// kind is `kind`. Used for the anonymous literal nodes of keywords.
+    fn push_keyword_token(&self, node: Node, kind: &str, tokens: &mut Vec<SemanticToken>) {
+        let mut cursor = node.walk();
+        if let Some(child) = node.children(&mut cursor).find(|c| c.kind() == kind) {
+            tokens.push(SemanticToken {
+                range: self.node_range(child),
+                token_type: SemanticTokenType::Keyword,
+                modifiers: vec![],
+            });
         }
     }
 
@@ -1874,6 +1904,13 @@ pub fn is_builtin_type(name: &str) -> bool {
             | "Maybe"
             | "Either"
             | "JubjubPoint"
+            | "PublicAddress"
+            | "Curve25519Base"
+            | "Curve25519Scalar"
+            | "Curve25519Point"
+            | "Secp256r1Base"
+            | "Secp256r1Scalar"
+            | "Secp256r1Point"
             | "MerkleTreePathEntry"
             | "MerkleTreePath"
             | "ZswapCoinPublicKey"
@@ -2484,6 +2521,40 @@ struct Point {
         assert!(
             !property_tokens.is_empty(),
             "Should find property tokens for struct fields"
+        );
+    }
+
+    #[test]
+    fn test_semantic_tokens_new_keywords() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Field): Boolean;
+}
+
+contract implements Token;
+
+circuit f(): [] {
+    emit([1, 2]);
+    return [];
+}
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+        let keywords: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.token_type == SemanticTokenType::Keyword)
+            .collect();
+        assert!(
+            keywords.len() >= 2,
+            "expected keyword tokens for emit/implements, got {keywords:?}"
+        );
+        assert!(
+            keywords.iter().any(|t| t.range.start.line == 5),
+            "expected keyword token(s) on the `contract implements` line"
+        );
+        assert!(
+            keywords.iter().any(|t| t.range.start.line == 8),
+            "expected the `emit` keyword token"
         );
     }
 

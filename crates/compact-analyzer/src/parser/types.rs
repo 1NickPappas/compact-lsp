@@ -124,6 +124,7 @@ pub enum SemanticTokenType {
     Variable = 7,
     Namespace = 8,
     TypeParameter = 9,
+    Keyword = 10,
 }
 
 /// Semantic token modifiers for syntax highlighting.
