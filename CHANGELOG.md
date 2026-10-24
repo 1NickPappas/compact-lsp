@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Improved contract-reference typing: same-file `type` aliases are followed (including chains,
+  e.g. `type A = B; type B = Token;`) and `const t = make();` infers `t`'s type from the callee's
+  declared return type. Member completion/hover/definition/signature help now fire on contract
+  types reached through an alias or an inferred binding.
+
 ## [0.3.0] - 2026-10-24
 
 ### Added

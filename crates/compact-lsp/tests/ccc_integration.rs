@@ -182,8 +182,29 @@ fn assert_contract_member_features(
     def_uri_marker: &str,
     def_line: u32,
 ) {
-    // Member completion after `ref.`.
-    let dot = line_col(main_src, call_line, "ref.", 4);
+    assert_member_features(
+        client,
+        main_uri,
+        main_src,
+        "ref",
+        call_line,
+        def_uri_marker,
+        def_line,
+    );
+}
+
+/// Assert the full member-feature set for `<base>.transfer(...)` in `main_src`.
+fn assert_member_features(
+    client: &mut LspClient,
+    main_uri: &str,
+    main_src: &str,
+    base: &str,
+    call_line: u32,
+    def_uri_marker: &str,
+    def_line: u32,
+) {
+    // Member completion after `<base>.`.
+    let dot = line_col(main_src, call_line, &format!("{base}."), base.len() + 1);
     let completion = client.request(
         "textDocument/completion",
         json!({
@@ -460,6 +481,82 @@ circuit useIt(ref: Token): Boolean {
     // Only the caller is open; `token.compact` is resolved from the scan cache.
     open(&mut client, &main_uri, main_src);
     assert_contract_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
+    client.shutdown();
+}
+
+/// A local `type` alias pointing at an imported contract type is followed.
+#[test]
+fn test_cross_file_contract_type_via_alias() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+type MyToken = T_Token;
+
+circuit useIt(ref: MyToken): Boolean {
+    return ref.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_contract_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
+    client.shutdown();
+}
+
+/// `const t = make();` infers `t`'s type from the callee's declared return type.
+#[test]
+fn test_cross_file_contract_type_inferred_from_call() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit make(): T_Token {
+}
+
+circuit useIt(): Boolean {
+    const t = make();
+    return t.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, "t", 8, "token.compact", 2);
     client.shutdown();
 }
 

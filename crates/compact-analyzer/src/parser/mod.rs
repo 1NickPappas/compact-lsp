@@ -1911,21 +1911,34 @@ impl ParserEngine {
         None
     }
 
-    /// Look up the type of a variable by name (searches ledger declarations).
+    /// Look up the type of a variable by name.
+    ///
+    /// Returns the declared type annotation when present, otherwise a type
+    /// inferred from a `const x = f();` initializer call. Same-file `type`
+    /// aliases are followed to their target, so a contract reference is
+    /// reachable even when it is written through an alias.
     pub fn get_variable_type(&mut self, source: &str, variable_name: &str) -> Option<String> {
         let tree = self.parse(source)?;
+        let root = tree.root_node();
         let source_bytes = source.as_bytes();
-        self.find_variable_type(tree.root_node(), source_bytes, variable_name)
+        let raw = self.find_variable_type(root, root, source_bytes, variable_name)?;
+        Some(self.resolve_type_name(root, source_bytes, &raw))
     }
 
     /// Recursively search the AST for a declaration of `variable_name` and
-    /// return its type annotation.
+    /// return its type (annotation, or inferred from the initializer).
     ///
     /// Handles ledger fields (`ldecl`), circuit/witness parameters (`parg`), and
-    /// typed const bindings (`const x: T = ...`). A contract reference is
-    /// typically a `parg` or an `ldecl`, so this powers `ref.circuit(...)`
-    /// member completion.
-    fn find_variable_type(&self, node: Node, source: &[u8], variable_name: &str) -> Option<String> {
+    /// typed/`const` bindings (`const x: T = ...` / `const x = f()`). A contract
+    /// reference is typically a `parg` or an `ldecl`, so this powers
+    /// `ref.circuit(...)` member completion.
+    fn find_variable_type(
+        &self,
+        root: Node,
+        node: Node,
+        source: &[u8],
+        variable_name: &str,
+    ) -> Option<String> {
         match node.kind() {
             "ldecl" => {
                 if self.get_field_text(node, "name", source).as_deref() == Some(variable_name) {
@@ -1936,7 +1949,15 @@ impl ParserEngine {
                 if let Some(pattern) = node.child_by_field_name("pattern")
                     && self.pattern_binds(pattern, source, variable_name)
                 {
-                    return self.get_field_text(node, "type", source);
+                    if let Some(ty) = self.get_field_text(node, "type", source) {
+                        return Some(ty);
+                    }
+                    // `const t = f();` with no annotation: use `f`'s return type.
+                    if let Some(value) = node.child_by_field_name("value")
+                        && let Some(ty) = self.infer_call_return_type(root, source, value)
+                    {
+                        return Some(ty);
+                    }
                 }
             }
             _ => {}
@@ -1944,11 +1965,93 @@ impl ParserEngine {
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if let Some(result) = self.find_variable_type(child, source, variable_name) {
+            if let Some(result) = self.find_variable_type(root, child, source, variable_name) {
                 return Some(result);
             }
         }
 
+        None
+    }
+
+    /// Follow same-file `type Name = Target;` aliases (chained) to the final
+    /// head type name.
+    fn resolve_type_name(&self, root: Node, source: &[u8], type_text: &str) -> String {
+        let mut current = Self::head_type_name(type_text);
+        let mut seen = std::collections::HashSet::new();
+        // Bounded by `seen` (cycles) and a hard cap as a safety net.
+        while seen.insert(current.clone()) && seen.len() <= 32 {
+            match self.find_type_alias(root, source, &current) {
+                Some(target) => current = Self::head_type_name(&target),
+                None => break,
+            }
+        }
+        current
+    }
+
+    /// The head identifier of a type expression (`Foo<Bar>` -> `Foo`).
+    fn head_type_name(type_text: &str) -> String {
+        type_text
+            .split('<')
+            .next()
+            .unwrap_or(type_text)
+            .trim()
+            .to_string()
+    }
+
+    /// Find a non-generic `type_alias_declaration` named `name` and return its
+    /// target type text. Generic aliases are skipped (we cannot substitute args).
+    fn find_type_alias(&self, node: Node, source: &[u8], name: &str) -> Option<String> {
+        if node.kind() == "type_alias_declaration"
+            && node.child_by_field_name("gparams").is_none()
+            && self.get_field_text(node, "name", source).as_deref() == Some(name)
+        {
+            return self.get_field_text(node, "type", source);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_type_alias(child, source, name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// If `value` is (a parenthesized) call to a circuit declared in this file,
+    /// return that circuit's declared return type.
+    fn infer_call_return_type(&self, root: Node, source: &[u8], value: Node) -> Option<String> {
+        let call = self.find_call_term(value)?;
+        let fun = call.child_by_field_name("fun")?;
+        let callee = fun.child_by_field_name("id")?;
+        let callee_name = self.node_text(callee, source);
+        self.find_callable_return_type(root, source, &callee_name)
+    }
+
+    /// Descend through transparent expression wrappers to the first call term.
+    fn find_call_term<'a>(&self, node: Node<'a>) -> Option<Node<'a>> {
+        match node.kind() {
+            "function_call_term" => return Some(node),
+            "expr" | "term" | "expr_seq" | "expr_seq_term" => {}
+            _ => return None,
+        }
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor)
+            .find_map(|child| self.find_call_term(child))
+    }
+
+    /// Find a circuit/witness/contract-circuit definition named `name` and
+    /// return its declared return type.
+    fn find_callable_return_type(&self, node: Node, source: &[u8], name: &str) -> Option<String> {
+        if matches!(node.kind(), "cdefn" | "wdecl" | "ecdecl_circuit")
+            && self.get_field_text(node, "id", source).as_deref() == Some(name)
+        {
+            return self.get_field_text(node, "type", source);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_callable_return_type(child, source, name) {
+                return Some(found);
+            }
+        }
         None
     }
 
@@ -2694,6 +2797,119 @@ circuit useLedger(): Boolean {
             Some("Token")
         );
         assert!(parser.get_variable_type(source, "nope").is_none());
+    }
+
+    #[test]
+    fn test_variable_type_follows_aliases() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+type MyToken = Token;
+type Chain = MyToken;
+
+circuit viaAlias(ref: MyToken): Boolean {
+    return ref.transfer(0);
+}
+
+const stored: Chain = default<Chain>;
+
+circuit viaChainedAlias(): Boolean {
+    return stored.transfer(0);
+}
+"#;
+        assert_eq!(
+            parser.get_variable_type(source, "ref").as_deref(),
+            Some("Token")
+        );
+        assert_eq!(
+            parser.get_variable_type(source, "stored").as_deref(),
+            Some("Token")
+        );
+    }
+
+    #[test]
+    fn test_variable_type_inferred_from_call_return() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+circuit make(): Token {
+    return ref;
+}
+
+circuit useInferred(): Boolean {
+    const t = make();
+    const u = (make());
+    return t.transfer(0);
+}
+"#;
+        assert_eq!(
+            parser.get_variable_type(source, "t").as_deref(),
+            Some("Token")
+        );
+        assert_eq!(
+            parser.get_variable_type(source, "u").as_deref(),
+            Some("Token")
+        );
+    }
+
+    #[test]
+    fn test_variable_type_annotation_wins_over_inference() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+contract Other {
+    circuit nop(): Boolean;
+}
+
+type MyToken = Token;
+
+circuit make(): Other {
+    return other;
+}
+
+circuit useAnnotated(): Boolean {
+    const t: MyToken = make();
+    return t.transfer(0);
+}
+"#;
+        // The annotation `MyToken` is resolved through the alias to `Token`,
+        // not the callee's (unrelated) return type `Other`.
+        assert_eq!(
+            parser.get_variable_type(source, "t").as_deref(),
+            Some("Token")
+        );
+    }
+
+    #[test]
+    fn test_variable_type_no_inference_for_non_call() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit f(a: Uint<64>, b: Uint<64>): Uint<64> {
+    return a;
+}
+
+circuit g(): Uint<64> {
+    const x = f(1, 2);
+    const y = 1 + 2;
+    return x;
+}
+"#;
+        // A call to a circuit whose return type is a builtin resolves to its
+        // head type name (matching `extract_base_type`)...
+        assert_eq!(
+            parser.get_variable_type(source, "x").as_deref(),
+            Some("Uint")
+        );
+        // ...but a non-call initializer yields nothing.
+        assert!(parser.get_variable_type(source, "y").is_none());
     }
 
     #[test]

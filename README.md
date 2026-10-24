@@ -63,17 +63,19 @@ circuit useIt(ref: Token, to: Address, amount: Uint<64>): Boolean {
 }
 ```
 
-The contract type may live in another file: import it (`import "./Token";` or
-`import "./Token" prefix T_;`) and the features work **across files** — including when the
-defining file is not open, resolved from the workspace scan. `contract implements` requires
-language 0.26+.
+The reference's type is resolved syntactically: from a written annotation (`ref: Token`), through
+a local alias (`type MyToken = Token;`), or inferred from the initializer of a `const`
+(`const t = make();` uses `make`'s declared return type). The contract type itself may live in
+another file: import it (`import "./Token";` or `import "./Token" prefix T_;`) and the features
+work **across files** — including when the defining file is not open, resolved from the workspace
+scan. `contract implements` requires language 0.26+.
 
 ### Known Limitations
 
 | Area | Status |
 |------|--------|
 | Code Actions | Not implemented |
-| Contract-reference typing | Heuristic: resolves `parg` / `const` / `ledger` type annotations; no full type inference (e.g. values produced by generic expressions) |
+| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, and infers `const t = make();` from the callee's declared return type. Does not infer through member calls, generics, or a callee defined in another file (type names are file-scoped) |
 | Find References / Rename for contract-type circuits | Follows value symbols today; cross-contract circuit rename is not yet wired |
 | Range formatting | `format-compact` is whole-document only |
 
