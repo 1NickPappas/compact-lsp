@@ -56,6 +56,12 @@ jobs:
       # Install the mainnet toolchain so they actually run and catch
       # registry-vs-compiler drift.
       - name: Install Compact devtools and toolchain ${{ matrix.compact }}
+        # Authenticate the release lookup: `compact update` queries the GitHub
+        # API, and unauthenticated requests are rate-limited (this broke the
+        # third matrix leg when all three jobs installed a toolchain at once).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
             https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
