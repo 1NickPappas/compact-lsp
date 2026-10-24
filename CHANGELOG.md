@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   e.g. `type A = B; type B = Token;`) and `const t = make();` infers `t`'s type from the callee's
   declared return type. Member completion/hover/definition/signature help now fire on contract
   types reached through an alias or an inferred binding.
+- **Cross-file callee inference**: `const t = F_make();` where `make` is defined in another file
+  now infers `t`'s contract type from the callee's declared return type, resolved in the callee's
+  own file scope (type names are file-scoped).
+- **Find References and Rename for contract-type circuits**: triggered on a circuit declaration or
+  a `ref.circuit(...)` use and gated by the base's resolved contract type, so unrelated `.circuit`
+  members are never touched. Works across files, tolerates canonical/non-canonical file URIs.
 
 ## [0.3.0] - 2026-10-24
 

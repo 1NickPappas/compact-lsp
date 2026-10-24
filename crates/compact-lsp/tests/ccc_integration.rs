@@ -595,3 +595,213 @@ circuit useIt(ref: T_Token): Boolean {
     assert_contract_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
     client.shutdown();
 }
+
+/// Extract `(uri, start line)` pairs from a `textDocument/references` response.
+fn location_pairs(value: &Value) -> Vec<(String, u32)> {
+    value
+        .get("result")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|loc| {
+                    let uri = loc.get("uri")?.as_str()?.to_string();
+                    let line = loc.pointer("/range/start/line")?.as_u64()? as u32;
+                    Some((uri, line))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `const t = F_make();` where `make` is defined in another file: infer `t`'s
+/// type from the callee's return type, resolved in the *callee's* file scope.
+#[test]
+fn test_cross_file_inferred_from_imported_callee() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let factory_src = r#"
+import "./token" prefix T_;
+
+export circuit make(): T_Token {
+}
+"#;
+    let main_src = r#"
+import "./factory" prefix F_;
+
+circuit useIt(): Boolean {
+    const t = F_make();
+    return t.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let factory_file = dir.path().join("factory.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&factory_file, factory_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let factory_uri = format!("file://{}", factory_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &factory_uri, factory_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, "t", 5, "token.compact", 2);
+    client.shutdown();
+}
+
+/// Find References for a contract circuit: from its declaration and from a use,
+/// across files, gated by the base's resolved contract type.
+#[test]
+fn test_contract_circuit_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit useIt(a: T_Token, b: T_Token): Boolean {
+    a.transfer(0, 1);
+    b.transfer(2, 3);
+    return true;
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    // From the declaration in token.compact: def + two uses.
+    let from_decl = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": token_uri },
+            "position": { "line": 2, "character": 15 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    let pairs = location_pairs(&from_decl);
+    assert_eq!(pairs.len(), 3, "expected def + 2 uses: {from_decl}");
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("token.compact") && *l == 2),
+        "missing declaration: {from_decl}"
+    );
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("caller.compact") && *l == 4),
+        "missing first use: {from_decl}"
+    );
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("caller.compact") && *l == 5),
+        "missing second use: {from_decl}"
+    );
+
+    // From a use in caller.compact: same set.
+    let from_use = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": main_uri },
+            "position": { "line": 4, "character": 7 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    assert_eq!(
+        location_pairs(&from_use).len(),
+        3,
+        "expected def + 2 uses: {from_use}"
+    );
+
+    client.shutdown();
+}
+
+/// Rename a contract circuit: edits its declaration and every gated use.
+#[test]
+fn test_contract_circuit_rename() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit useIt(a: T_Token, b: T_Token): Boolean {
+    a.transfer(0, 1);
+    b.transfer(2, 3);
+    return true;
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    let edit = client.request(
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": token_uri },
+            "position": { "line": 2, "character": 15 },
+            "newName": "send"
+        }),
+    );
+    let changes = edit
+        .pointer("/result/changes")
+        .and_then(|c| c.as_object())
+        .unwrap_or_else(|| panic!("expected workspace edit changes: {edit}"));
+
+    let mut token_edits = 0;
+    let mut caller_edits = 0;
+    for (uri, edits) in changes {
+        let arr = edits.as_array().expect("edits array");
+        for e in arr {
+            assert_eq!(e.get("newText").and_then(|v| v.as_str()), Some("send"));
+        }
+        if uri.contains("token.compact") {
+            token_edits += arr.len();
+        }
+        if uri.contains("caller.compact") {
+            caller_edits += arr.len();
+        }
+    }
+    assert_eq!(token_edits, 1, "declaration edit: {edit}");
+    assert_eq!(caller_edits, 2, "usage edits: {edit}");
+
+    client.shutdown();
+}

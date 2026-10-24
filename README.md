@@ -34,7 +34,7 @@ Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35
 | **Folding Ranges** | Code folding for blocks and functions |
 | **Cross-file Errors** | Errors propagate to dependent files on save |
 | **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
-| **Cross-contract calls** | Completion, hover, go-to-definition, and signature help for `ref.circuit(...)`; `contract implements` type completion |
+| **Cross-contract calls** | Completion, hover, go-to-definition, signature help, find-references, and rename for `ref.circuit(...)`; `contract implements` type completion |
 
 ### Cross-Project Support
 
@@ -65,18 +65,19 @@ circuit useIt(ref: Token, to: Address, amount: Uint<64>): Boolean {
 
 The reference's type is resolved syntactically: from a written annotation (`ref: Token`), through
 a local alias (`type MyToken = Token;`), or inferred from the initializer of a `const`
-(`const t = make();` uses `make`'s declared return type). The contract type itself may live in
-another file: import it (`import "./Token";` or `import "./Token" prefix T_;`) and the features
-work **across files** — including when the defining file is not open, resolved from the workspace
-scan. `contract implements` requires language 0.26+.
+(`const t = make();` uses `make`'s declared return type — including when `make` is defined in
+another file, whose scope decides what the return-type name means). The contract type itself may
+live in another file: import it (`import "./Token";` or `import "./Token" prefix T_;`) and the
+features work **across files** — including when the defining file is not open, resolved from the
+workspace scan. Find-references and rename follow a circuit across every file where a
+contract-typed reference uses it. `contract implements` requires language 0.26+.
 
 ### Known Limitations
 
 | Area | Status |
 |------|--------|
 | Code Actions | Not implemented |
-| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, and infers `const t = make();` from the callee's declared return type. Does not infer through member calls, generics, or a callee defined in another file (type names are file-scoped) |
-| Find References / Rename for contract-type circuits | Follows value symbols today; cross-contract circuit rename is not yet wired |
+| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Does not infer through member calls or generics |
 | Range formatting | `format-compact` is whole-document only |
 
 ## Requirements

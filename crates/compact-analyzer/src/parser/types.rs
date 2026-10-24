@@ -171,6 +171,8 @@ pub struct ContractCircuit {
     pub documentation: Option<String>,
     /// Range of the whole `ecdecl_circuit`.
     pub location: SymbolLocation,
+    /// Range of just the circuit name (`id`), for references/rename.
+    pub name_location: SymbolLocation,
 }
 
 /// A contract type: `contract Name { circuit …; }`.

@@ -18,6 +18,7 @@ mod workspace;
 
 pub use state::Document;
 
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -514,13 +515,41 @@ impl CompactLanguageServer {
     }
 
     /// Find an imported symbol by name (with prefix handling).
+    /// Prefer the URI the client is using for a file (an open document), so
+    /// edits and locations land on the buffer the editor knows about.
+    fn preferred_uri(&self, uri: &str) -> String {
+        if self.documents.contains_key(uri) {
+            return uri.to_string();
+        }
+        let key = canonical_key(uri);
+        for entry in self.documents.iter() {
+            if canonical_key(entry.key()) == key {
+                return entry.key().clone();
+            }
+        }
+        for entry in self.source_cache.iter() {
+            if canonical_key(entry.key()) == key {
+                return entry.key().clone();
+            }
+        }
+        uri.to_string()
+    }
+
+    /// Content of a file: the open document if present, else the cached scan.
+    fn source_for(&self, uri: &str) -> Option<String> {
+        if let Some(doc) = self.documents.get(uri) {
+            return Some(doc.content.to_string());
+        }
+        self.source_cache.get(uri).map(|c| c.clone())
+    }
+
     fn find_imported_symbol(
         &self,
         current_uri: &str,
         name: &str,
     ) -> Option<(String, CompletionSymbol)> {
         let file_imports = {
-            let content = self.documents.get(current_uri)?.content.to_string();
+            let content = self.source_for(current_uri)?;
             let mut parser = self.parser_engine.lock().unwrap();
             parser.get_imports(&content)
         };
@@ -568,24 +597,20 @@ impl CompactLanguageServer {
         current_uri: &str,
         type_name: &str,
     ) -> Option<(String, ContractTypeInfo)> {
-        // 1. The current file.
-        if let Some(doc) = self.documents.get(current_uri) {
-            let content = doc.content.to_string();
-            if let Some(info) = self.parse_contract_type(&content, type_name) {
-                return Some((current_uri.to_string(), info));
-            }
+        // 1. The file itself (open buffer or cached scan).
+        if let Some(content) = self.source_for(current_uri)
+            && let Some(info) = self.parse_contract_type(&content, type_name)
+        {
+            return Some((current_uri.to_string(), info));
         }
 
         // 2. An imported symbol (handles `prefix` imports).
         if let Some((file_uri, symbol)) = self.find_imported_symbol(current_uri, type_name)
             && symbol.kind == CompletionSymbolKind::Contract
+            && let Some(content) = self.source_for(&file_uri)
+            && let Some(info) = self.parse_contract_type(&content, &symbol.name)
         {
-            let content = self.source_cache.get(&file_uri).map(|c| c.clone());
-            if let Some(content) = content
-                && let Some(info) = self.parse_contract_type(&content, &symbol.name)
-            {
-                return Some((file_uri, info));
-            }
+            return Some((file_uri, info));
         }
 
         // 3. Any workspace file that declares a contract type with this name.
@@ -601,7 +626,7 @@ impl CompactLanguageServer {
             .map(|entry| entry.key().clone())
             .collect();
         for file_uri in candidates {
-            let content = self.source_cache.get(&file_uri).map(|c| c.clone());
+            let content = self.source_for(&file_uri);
             if let Some(content) = content
                 && let Some(info) = self.parse_contract_type(&content, type_name)
             {
@@ -614,6 +639,182 @@ impl CompactLanguageServer {
     fn parse_contract_type(&self, content: &str, name: &str) -> Option<ContractTypeInfo> {
         let mut parser = self.parser_engine.lock().unwrap();
         parser.contract_type(content, name)
+    }
+
+    /// Resolve a bare symbol name: a `prefix` import first, then any workspace file.
+    fn find_symbol_anywhere(
+        &self,
+        current_uri: &str,
+        name: &str,
+    ) -> Option<(String, CompletionSymbol)> {
+        if let Some(found) = self.find_imported_symbol(current_uri, name) {
+            return Some(found);
+        }
+        for entry in self.symbol_cache.iter() {
+            if let Some(symbol) = entry.value().iter().find(|s| s.name == name) {
+                return Some((entry.key().clone(), symbol.clone()));
+            }
+        }
+        None
+    }
+
+    /// Resolve the contract type of a value named `var_name` in `content`.
+    ///
+    /// Handles a written annotation, same-file aliases, and inference from a
+    /// `const x = f();` initializer — including when `f` is defined in another
+    /// file, whose return type is then resolved **in that file's scope** (type
+    /// names are file-scoped, so the callee's file decides what the name means).
+    fn resolve_variable_contract_type(
+        &self,
+        uri: &str,
+        content: &str,
+        var_name: &str,
+    ) -> Option<(String, ContractTypeInfo)> {
+        // 1. Same-file resolution (annotation / alias / local call inference).
+        let type_name = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_variable_type(content, var_name)
+        };
+        if let Some(type_name) = type_name
+            && let Some(found) = self.resolve_contract_type(uri, &type_name)
+        {
+            return Some(found);
+        }
+
+        // 2. Cross-file inference: `const x = callee();`.
+        let callee = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_initializer_callee(content, var_name)
+        }?;
+        let (callee_uri, callee_symbol) = self.find_symbol_anywhere(uri, &callee)?;
+        let callee_content = self.source_for(&callee_uri)?;
+        let return_type = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_callable_return_type(&callee_content, &callee_symbol.name)?
+        };
+        let aliased = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.resolve_alias(&callee_content, &return_type)
+        };
+        self.resolve_contract_type(&callee_uri, &aliased)
+    }
+
+    /// If `position` targets a contract-type circuit (its declaration or a
+    /// `base.circuit(...)` use), return the defining file, contract, and name.
+    fn contract_circuit_target(
+        &self,
+        uri: &str,
+        content: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, ContractTypeInfo, String)> {
+        // (a) Cursor on an `ecdecl_circuit` declaration.
+        let at_decl = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.circuit_at_position(content, line, character)
+        };
+        if let Some((contract_name, circuit_name)) = at_decl
+            && let Some((file_uri, contract)) = self.resolve_contract_type(uri, &contract_name)
+        {
+            return Some((file_uri, contract, circuit_name));
+        }
+
+        // (b) Cursor on a `base.circuit` member whose base is a contract value.
+        let member = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_member_access_context(content, line, character)
+        }?;
+        let (file_uri, contract) =
+            self.resolve_variable_contract_type(uri, content, &member.base_name)?;
+        if contract
+            .circuits
+            .iter()
+            .any(|c| c.name == member.member_name)
+        {
+            return Some((file_uri, contract, member.member_name));
+        }
+        None
+    }
+
+    /// Collect references (and optionally the declaration) of a contract circuit
+    /// across all cached files, gated by each base's resolved contract type.
+    fn collect_contract_circuit_refs(
+        &self,
+        contract_uri: &str,
+        contract: &ContractTypeInfo,
+        circuit_name: &str,
+        include_definition: bool,
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+
+        if include_definition
+            && let Some(circuit) = contract.circuits.iter().find(|c| c.name == circuit_name)
+            && let Ok(def_uri) = contract_uri.parse::<Uri>()
+        {
+            locations.push(Location {
+                uri: def_uri,
+                range: Range {
+                    start: Position {
+                        line: circuit.name_location.start_line,
+                        character: circuit.name_location.start_char,
+                    },
+                    end: Position {
+                        line: circuit.name_location.end_line,
+                        character: circuit.name_location.end_char,
+                    },
+                },
+            });
+        }
+
+        for entry in self.source_cache.iter() {
+            let file_uri = entry.key();
+            let file_content = entry.value();
+            if !file_content.contains(circuit_name) {
+                continue;
+            }
+            let uses = {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.collect_member_accesses(file_content, circuit_name)
+            };
+            for use_ctx in uses {
+                let Some((resolved_uri, resolved_contract)) =
+                    self.resolve_variable_contract_type(file_uri, file_content, &use_ctx.base_name)
+                else {
+                    continue;
+                };
+                if same_file(&resolved_uri, contract_uri)
+                    && resolved_contract.name == contract.name
+                    && let Ok(loc_uri) = file_uri.parse::<Uri>()
+                {
+                    locations.push(Location {
+                        uri: loc_uri,
+                        range: use_ctx.member_range,
+                    });
+                }
+            }
+        }
+
+        // Prefer open-buffer URIs and drop duplicates (the same file can appear
+        // under canonical and non-canonical URIs, e.g. macOS `/var`).
+        let mut seen = std::collections::HashSet::new();
+        let mut unique = Vec::new();
+        for mut loc in locations {
+            let uri_str = self.preferred_uri(&loc.uri.to_string());
+            if !seen.insert((
+                canonical_key(&uri_str),
+                loc.range.start.line,
+                loc.range.start.character,
+                loc.range.end.line,
+                loc.range.end.character,
+            )) {
+                continue;
+            }
+            if let Ok(u) = uri_str.parse::<Uri>() {
+                loc.uri = u;
+                unique.push(loc);
+            }
+        }
+        unique
     }
 
     /// Build a SignatureHelp response from SignatureInfo.
@@ -980,6 +1181,34 @@ impl LanguageServer for CompactLanguageServer {
 
             if let Some(var_name) = var_name {
                 tracing::debug!("Dot completion: base variable = {}", var_name);
+
+                // Contract type? Offer its declared circuits (cross-contract calls).
+                // Covers annotations, aliases, and same-/cross-file `const x = f();`.
+                if let Some((_file, contract)) =
+                    self.resolve_variable_contract_type(&uri, &content, &var_name)
+                    && !contract.circuits.is_empty()
+                {
+                    let items: Vec<CompletionItem> = contract
+                        .circuits
+                        .iter()
+                        .map(|c| CompletionItem {
+                            label: c.name.clone(),
+                            kind: Some(CompletionItemKind::METHOD),
+                            detail: Some(format!("{}{}", contract.name, c.detail)),
+                            documentation: c.documentation.clone().map(|d| {
+                                Documentation::MarkupContent(MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: d,
+                                })
+                            }),
+                            insert_text: Some(format!("{}({})", c.name, "$0")),
+                            insert_text_format: Some(InsertTextFormat::SNIPPET),
+                            ..Default::default()
+                        })
+                        .collect();
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+
                 let var_type = {
                     let mut parser = self.parser_engine.lock().unwrap();
                     parser.get_variable_type(&content, &var_name)
@@ -994,32 +1223,6 @@ impl LanguageServer for CompactLanguageServer {
                 });
                 if let Some(type_str) = var_type {
                     let base_type = builtins::extract_base_type(&type_str);
-
-                    // Contract type? Offer its declared circuits (cross-contract calls).
-                    if let Some((_file, contract)) = self.resolve_contract_type(&uri, base_type)
-                        && !contract.circuits.is_empty()
-                    {
-                        let items: Vec<CompletionItem> = contract
-                            .circuits
-                            .iter()
-                            .map(|c| CompletionItem {
-                                label: c.name.clone(),
-                                kind: Some(CompletionItemKind::METHOD),
-                                detail: Some(format!("{}{}", contract.name, c.detail)),
-                                documentation: c.documentation.clone().map(|d| {
-                                    Documentation::MarkupContent(MarkupContent {
-                                        kind: MarkupKind::Markdown,
-                                        value: d,
-                                    })
-                                }),
-                                insert_text: Some(format!("{}({})", c.name, "$0")),
-                                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                                ..Default::default()
-                            })
-                            .collect();
-                        return Ok(Some(CompletionResponse::Array(items)));
-                    }
-
                     tracing::debug!("Dot completion: resolved type = {}", base_type);
                     let methods = builtins::methods_for_type_for(base_type, self.language_version);
                     if !methods.is_empty() {
@@ -1656,6 +1859,34 @@ impl LanguageServer for CompactLanguageServer {
             parser.get_member_access_context(&content, position.line, position.character)
         };
         if let Some(ctx) = member_ctx {
+            // Contract-type circuit? (annotation / alias / inference, same or cross file.)
+            if let Some((_file, contract)) =
+                self.resolve_variable_contract_type(&uri, &content, &ctx.base_name)
+                && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
+            {
+                let signature = circuit
+                    .signature
+                    .strip_prefix("circuit ")
+                    .unwrap_or(&circuit.signature);
+                let hover_text = format!(
+                    "```compact\n{}.{}\n```\n\nCircuit on contract type `{}`{}",
+                    ctx.base_name,
+                    signature,
+                    contract.name,
+                    circuit
+                        .documentation
+                        .as_deref()
+                        .map(|d| format!("\n\n---\n\n{}", d))
+                        .unwrap_or_default()
+                );
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: hover_text,
+                    }),
+                    range: Some(ctx.member_range),
+                }));
+            }
             let var_type = {
                 let mut parser = self.parser_engine.lock().unwrap();
                 parser.get_variable_type(&content, &ctx.base_name)
@@ -1670,33 +1901,6 @@ impl LanguageServer for CompactLanguageServer {
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
-                if let Some((_file, contract)) = self.resolve_contract_type(&uri, base_type)
-                    && let Some(circuit) =
-                        contract.circuits.iter().find(|c| c.name == ctx.member_name)
-                {
-                    let signature = circuit
-                        .signature
-                        .strip_prefix("circuit ")
-                        .unwrap_or(&circuit.signature);
-                    let hover_text = format!(
-                        "```compact\n{}.{}\n```\n\nCircuit on contract type `{}`{}",
-                        ctx.base_name,
-                        signature,
-                        contract.name,
-                        circuit
-                            .documentation
-                            .as_deref()
-                            .map(|d| format!("\n\n---\n\n{}", d))
-                            .unwrap_or_default()
-                    );
-                    return Ok(Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: hover_text,
-                        }),
-                        range: Some(ctx.member_range),
-                    }));
-                }
                 if let Some(method) = builtins::find_method_by_name_for(
                     base_type,
                     &ctx.member_name,
@@ -1800,6 +2004,29 @@ impl LanguageServer for CompactLanguageServer {
             parser.get_member_access_context(&content, position.line, position.character)
         };
         if let Some(ctx) = member_ctx {
+            // Contract-type circuit? (annotation / alias / inference, same or cross file.)
+            if let Some((file_uri, contract)) =
+                self.resolve_variable_contract_type(&uri_string, &content, &ctx.base_name)
+                && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
+            {
+                let target_uri = match Uri::from_str(&file_uri) {
+                    Ok(u) => u,
+                    Err(_) => return Ok(None),
+                };
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: target_uri,
+                    range: Range {
+                        start: Position {
+                            line: circuit.location.start_line,
+                            character: circuit.location.start_char,
+                        },
+                        end: Position {
+                            line: circuit.location.end_line,
+                            character: circuit.location.end_char,
+                        },
+                    },
+                })));
+            }
             let var_type = {
                 let mut parser = self.parser_engine.lock().unwrap();
                 parser.get_variable_type(&content, &ctx.base_name)
@@ -1814,29 +2041,6 @@ impl LanguageServer for CompactLanguageServer {
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
-                if let Some((file_uri, contract)) =
-                    self.resolve_contract_type(&uri_string, base_type)
-                    && let Some(circuit) =
-                        contract.circuits.iter().find(|c| c.name == ctx.member_name)
-                {
-                    let target_uri = match Uri::from_str(&file_uri) {
-                        Ok(u) => u,
-                        Err(_) => return Ok(None),
-                    };
-                    return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                        uri: target_uri,
-                        range: Range {
-                            start: Position {
-                                line: circuit.location.start_line,
-                                character: circuit.location.start_char,
-                            },
-                            end: Position {
-                                line: circuit.location.end_line,
-                                character: circuit.location.end_char,
-                            },
-                        },
-                    })));
-                }
                 if let Some(doc_loc) =
                     builtins::get_builtin_method_doc_location(base_type, &ctx.member_name)
                 {
@@ -1983,55 +2187,44 @@ impl LanguageServer for CompactLanguageServer {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.get_enclosing_member_call(&content, position.line, position.character)
         };
-        if let Some(ctx) = member_call {
-            let var_type = {
-                let mut parser = self.parser_engine.lock().unwrap();
-                parser.get_variable_type(&content, &ctx.base_name)
+        if let Some(ctx) = member_call
+            && let Some((_file, contract)) =
+                self.resolve_variable_contract_type(&uri, &content, &ctx.base_name)
+            && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
+        {
+            let active_param =
+                utils::count_commas_before_cursor(&content, position.line, position.character);
+            let params = utils::parse_params_from_detail(&circuit.detail);
+            let parameters: Vec<ParameterInformation> = params
+                .iter()
+                .map(|p| ParameterInformation {
+                    label: ParameterLabel::Simple(p.clone()),
+                    documentation: None,
+                })
+                .collect();
+            let signature = SignatureInformation {
+                label: format!(
+                    "{}.{}",
+                    contract.name,
+                    circuit
+                        .signature
+                        .strip_prefix("circuit ")
+                        .unwrap_or(&circuit.signature)
+                ),
+                documentation: circuit.documentation.clone().map(|d| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: d,
+                    })
+                }),
+                parameters: Some(parameters),
+                active_parameter: Some(active_param),
             };
-            if let Some(type_str) = var_type {
-                let base_type = builtins::extract_base_type(&type_str);
-                if let Some((_file, contract)) = self.resolve_contract_type(&uri, base_type)
-                    && let Some(circuit) =
-                        contract.circuits.iter().find(|c| c.name == ctx.member_name)
-                {
-                    let active_param = utils::count_commas_before_cursor(
-                        &content,
-                        position.line,
-                        position.character,
-                    );
-                    let params = utils::parse_params_from_detail(&circuit.detail);
-                    let parameters: Vec<ParameterInformation> = params
-                        .iter()
-                        .map(|p| ParameterInformation {
-                            label: ParameterLabel::Simple(p.clone()),
-                            documentation: None,
-                        })
-                        .collect();
-                    let signature = SignatureInformation {
-                        label: format!(
-                            "{}.{}",
-                            contract.name,
-                            circuit
-                                .signature
-                                .strip_prefix("circuit ")
-                                .unwrap_or(&circuit.signature)
-                        ),
-                        documentation: circuit.documentation.clone().map(|d| {
-                            Documentation::MarkupContent(MarkupContent {
-                                kind: MarkupKind::Markdown,
-                                value: d,
-                            })
-                        }),
-                        parameters: Some(parameters),
-                        active_parameter: Some(active_param),
-                    };
-                    return Ok(Some(SignatureHelp {
-                        signatures: vec![signature],
-                        active_signature: Some(0),
-                        active_parameter: Some(active_param),
-                    }));
-                }
-            }
+            return Ok(Some(SignatureHelp {
+                signatures: vec![signature],
+                active_signature: Some(0),
+                active_parameter: Some(active_param),
+            }));
         }
 
         let func_name =
@@ -2154,6 +2347,23 @@ impl LanguageServer for CompactLanguageServer {
             Some(doc) => doc.content.to_string(),
             None => return Ok(None),
         };
+
+        // Contract-type circuit references: declaration or `base.circuit(...)`.
+        if let Some((contract_uri, contract, circuit_name)) =
+            self.contract_circuit_target(&uri_string, &content, position.line, position.character)
+        {
+            let locations = self.collect_contract_circuit_refs(
+                &contract_uri,
+                &contract,
+                &circuit_name,
+                include_declaration,
+            );
+            return Ok(if locations.is_empty() {
+                None
+            } else {
+                Some(locations)
+            });
+        }
 
         let symbol_name =
             match utils::get_word_at_position(&content, position.line, position.character) {
@@ -2280,6 +2490,30 @@ impl LanguageServer for CompactLanguageServer {
             ));
         }
 
+        // Contract-type circuit: rename its declaration and `base.circuit(...)` uses.
+        if let Some((contract_uri, contract, circuit_name)) =
+            self.contract_circuit_target(&uri_string, &content, position.line, position.character)
+        {
+            let locations =
+                self.collect_contract_circuit_refs(&contract_uri, &contract, &circuit_name, true);
+            if locations.is_empty() {
+                return Ok(None);
+            }
+            let mut edits: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
+                std::collections::HashMap::new();
+            for loc in locations {
+                edits.entry(loc.uri).or_default().push(TextEdit {
+                    range: loc.range,
+                    new_text: new_name.clone(),
+                });
+            }
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(edits),
+                document_changes: None,
+                change_annotations: None,
+            }));
+        }
+
         let mut changes: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
             std::collections::HashMap::new();
 
@@ -2340,6 +2574,39 @@ impl LanguageServer for CompactLanguageServer {
             document_changes: None,
             change_annotations: None,
         }))
+    }
+}
+
+/// Canonical filesystem key for a `file://` URI, tolerating canonicalization
+/// differences (e.g. macOS `/var` vs `/private/var`).
+fn canonical_key(uri: &str) -> String {
+    match uri.strip_prefix("file://") {
+        Some(p) => {
+            let path = Path::new(p);
+            path.canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy()
+                .into_owned()
+        }
+        None => uri.to_string(),
+    }
+}
+
+/// Compare two `file://` URIs, tolerating canonicalization differences (e.g.
+/// macOS `/var` vs `/private/var`).
+fn same_file(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.strip_prefix("file://"), b.strip_prefix("file://")) {
+        (Some(pa), Some(pb)) => {
+            let pa = Path::new(pa);
+            let pb = Path::new(pb);
+            let ca = pa.canonicalize().unwrap_or_else(|_| pa.to_path_buf());
+            let cb = pb.canonicalize().unwrap_or_else(|_| pb.to_path_buf());
+            ca == cb
+        }
+        _ => false,
     }
 }
 

@@ -1911,6 +1911,32 @@ impl ParserEngine {
         None
     }
 
+    /// Recursively collect member accesses named `member_name`.
+    fn collect_member_accesses_rec(
+        &self,
+        node: Node,
+        source: &[u8],
+        member_name: &str,
+        out: &mut Vec<MemberAccessContext>,
+    ) {
+        if node.kind() == "member_access_expr"
+            && let Some(member) = node.child_by_field_name("member")
+            && self.node_text(member, source) == member_name
+            && let Some(base) = node.child_by_field_name("base")
+            && let Some(base_name) = self.extract_base_identifier(base, source)
+        {
+            out.push(MemberAccessContext {
+                base_name,
+                member_name: member_name.to_string(),
+                member_range: self.node_range(member),
+            });
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_member_accesses_rec(child, source, member_name, out);
+        }
+    }
+
     /// Look up the type of a variable by name.
     ///
     /// Returns the declared type annotation when present, otherwise a type
@@ -1923,6 +1949,84 @@ impl ParserEngine {
         let source_bytes = source.as_bytes();
         let raw = self.find_variable_type(root, root, source_bytes, variable_name)?;
         Some(self.resolve_type_name(root, source_bytes, &raw))
+    }
+
+    /// Resolve a written type name through same-file `type` aliases.
+    pub fn resolve_alias(&mut self, source: &str, type_name: &str) -> String {
+        match self.parse(source) {
+            Some(tree) => self.resolve_type_name(tree.root_node(), source.as_bytes(), type_name),
+            None => type_name.to_string(),
+        }
+    }
+
+    /// Declared return type of a circuit/witness/contract-circuit named `name`.
+    pub fn get_callable_return_type(&mut self, source: &str, name: &str) -> Option<String> {
+        let tree = self.parse(source)?;
+        self.find_callable_return_type(tree.root_node(), source.as_bytes(), name)
+    }
+
+    /// For an unannotated `const x = f();` binding, return the callee name `f`.
+    /// Lets the caller infer `x`'s type when `f` is defined in another file.
+    pub fn get_initializer_callee(&mut self, source: &str, variable_name: &str) -> Option<String> {
+        let tree = self.parse(source)?;
+        self.find_initializer_callee(tree.root_node(), source.as_bytes(), variable_name)
+    }
+
+    /// All member accesses of `member_name` in the file, with their base names.
+    /// Used to gate Find References / Rename by the base's contract type.
+    pub fn collect_member_accesses(
+        &mut self,
+        source: &str,
+        member_name: &str,
+    ) -> Vec<MemberAccessContext> {
+        let Some(tree) = self.parse(source) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        self.collect_member_accesses_rec(
+            tree.root_node(),
+            source.as_bytes(),
+            member_name,
+            &mut out,
+        );
+        out
+    }
+
+    /// If the position is on a circuit declared by a contract type
+    /// (`ecdecl_circuit` inside `ecdecl`), return `(contract_name, circuit_name)`.
+    pub fn circuit_at_position(
+        &mut self,
+        source: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, String)> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+        let point = tree_sitter::Point {
+            row: line as usize,
+            column: character as usize,
+        };
+        let node = root.descendant_for_point_range(point, point)?;
+        let parent = node.parent()?;
+        if parent.kind() != "ecdecl_circuit" {
+            return None;
+        }
+        // Ensure the cursor is on the circuit's name, not a type in its signature.
+        let id_node = parent.child_by_field_name("id")?;
+        if id_node.start_byte() != node.start_byte() || id_node.end_byte() != node.end_byte() {
+            return None;
+        }
+        let circuit = self.node_text(id_node, source_bytes);
+        let mut ancestor = parent.parent();
+        while let Some(current) = ancestor {
+            if current.kind() == "ecdecl" {
+                let contract = self.get_field_text(current, "name", source_bytes)?;
+                return Some((contract, circuit));
+            }
+            ancestor = current.parent();
+        }
+        None
     }
 
     /// Recursively search the AST for a declaration of `variable_name` and
@@ -2055,6 +2159,34 @@ impl ParserEngine {
         None
     }
 
+    /// Find an unannotated `const x = f();` binding of `variable_name` and
+    /// return the callee name `f`.
+    fn find_initializer_callee(
+        &self,
+        node: Node,
+        source: &[u8],
+        variable_name: &str,
+    ) -> Option<String> {
+        if matches!(node.kind(), "const_binding" | "cbinding")
+            && node.child_by_field_name("type").is_none()
+            && let Some(pattern) = node.child_by_field_name("pattern")
+            && self.pattern_binds(pattern, source, variable_name)
+            && let Some(value) = node.child_by_field_name("value")
+            && let Some(call) = self.find_call_term(value)
+            && let Some(fun) = call.child_by_field_name("fun")
+            && let Some(id) = fun.child_by_field_name("id")
+        {
+            return Some(self.node_text(id, source));
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_initializer_callee(child, source, variable_name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     /// Whether a `pattern` node binds `name` (simple or destructuring).
     fn pattern_binds(&self, pattern: Node, source: &[u8], name: &str) -> bool {
         if let Some(id) = pattern.child_by_field_name("id") {
@@ -2114,12 +2246,17 @@ impl ParserEngine {
             let documentation = self
                 .extract_doc_comment(child, source)
                 .map(|doc| format!("---\n\n{}", doc));
+            let name_location = child
+                .child_by_field_name("id")
+                .map(|id| self.node_to_symbol_location(id))
+                .unwrap_or_else(|| self.node_to_symbol_location(child));
             circuits.push(ContractCircuit {
                 name: circuit_name,
                 detail,
                 signature,
                 documentation,
                 location: self.node_to_symbol_location(child),
+                name_location,
             });
         }
         ContractTypeInfo {
@@ -2967,6 +3104,72 @@ circuit f(): Boolean {
             parser.get_variable_type(source, "t").as_deref(),
             Some("Token")
         );
+    }
+
+    #[test]
+    fn test_get_callable_return_type_and_initializer_callee() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+circuit make(): Token {
+    return ref;
+}
+
+circuit useIt(): Boolean {
+    const t = make();
+    const annotated: Token = make();
+    return t.transfer(0);
+}
+"#;
+        assert_eq!(
+            parser.get_callable_return_type(source, "make").as_deref(),
+            Some("Token")
+        );
+        assert_eq!(
+            parser.get_initializer_callee(source, "t").as_deref(),
+            Some("make")
+        );
+        // Annotated bindings are not unannotated initializer callees.
+        assert!(parser.get_initializer_callee(source, "annotated").is_none());
+    }
+
+    #[test]
+    fn test_collect_member_accesses() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit useIt(a: Token, b: Token): Boolean {
+    a.transfer(0);
+    b.transfer(1);
+    a.balanceOf();
+}
+"#;
+        let uses = parser.collect_member_accesses(source, "transfer");
+        assert_eq!(uses.len(), 2);
+        assert_eq!(uses[0].base_name, "a");
+        assert_eq!(uses[1].base_name, "b");
+        assert!(parser.collect_member_accesses(source, "missing").is_empty());
+    }
+
+    #[test]
+    fn test_circuit_at_position() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+"#;
+        // On the circuit name.
+        assert_eq!(
+            parser.circuit_at_position(source, 2, 15),
+            Some(("Token".to_string(), "transfer".to_string()))
+        );
+        // On a type inside the signature.
+        assert!(parser.circuit_at_position(source, 2, 25).is_none());
+        // On the contract name.
+        assert!(parser.circuit_at_position(source, 1, 10).is_none());
     }
 
     #[test]
