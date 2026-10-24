@@ -960,3 +960,147 @@ circuit useIt(w: Wallet): Boolean {
 
     client.shutdown();
 }
+
+/// Expression base: `make().transfer(...)` where `make()` returns the contract
+/// type. Covers completion (text-extracted base) + AST-based member features.
+#[test]
+fn test_member_call_base() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit make(): T_Token {
+}
+
+circuit useIt(): Boolean {
+    return make().transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(
+        &mut client,
+        &main_uri,
+        main_src,
+        "make()",
+        7,
+        "token.compact",
+        2,
+    );
+    client.shutdown();
+}
+
+/// Index base: `items[0].transfer(...)` where `items: Vector<Token>`.
+#[test]
+fn test_member_index_base() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit useIt(items: Vector<10, T_Token>): Boolean {
+    return items[0].transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(
+        &mut client,
+        &main_uri,
+        main_src,
+        "items[0]",
+        4,
+        "token.compact",
+        2,
+    );
+    client.shutdown();
+}
+
+/// Find References must find a contract-circuit use behind a call base.
+#[test]
+fn test_member_expression_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit make(): T_Token {
+}
+
+circuit useIt(): Boolean {
+    make().transfer(0, 1);
+    return true;
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    let refs = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": token_uri },
+            "position": { "line": 2, "character": 15 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    let pairs = location_pairs(&refs);
+    assert_eq!(pairs.len(), 2, "expected def + 1 call-base use: {refs}");
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("caller.compact") && *l == 7),
+        "missing call-base use: {refs}"
+    );
+
+    client.shutdown();
+}

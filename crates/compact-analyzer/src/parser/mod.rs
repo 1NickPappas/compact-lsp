@@ -1880,19 +1880,19 @@ impl ParserEngine {
             return None;
         }
 
-        // Extract the base path (`w.token` → ["w", "token"]).
+        // Extract the base expression (`w.token`, `make()`, `arr[i]`, …).
         let base_node = parent.child_by_field_name("base")?;
-        let base_chain = self.base_chain(base_node, source_bytes);
-        if base_chain.is_empty() {
+        let base = self.member_base(base_node, source_bytes);
+        if base == MemberBase::Other {
             return None;
         }
-        let base_name = base_chain.join(".");
+        let base_name = Self::member_base_display(&base);
         let member_name = self.node_text(node, source_bytes);
         let member_range = self.node_range(node);
 
         Some(MemberAccessContext {
             base_name,
-            base_chain,
+            base,
             member_name,
             member_range,
         })
@@ -1915,11 +1915,11 @@ impl ParserEngine {
             && self.node_text(member, source) == member_name
             && let Some(base) = node.child_by_field_name("base")
         {
-            let base_chain = self.base_chain(base, source);
-            if !base_chain.is_empty() {
+            let member_base = self.member_base(base, source);
+            if member_base != MemberBase::Other {
                 out.push(MemberAccessContext {
-                    base_name: base_chain.join("."),
-                    base_chain,
+                    base_name: Self::member_base_display(&member_base),
+                    base: member_base,
                     member_name: member_name.to_string(),
                     member_range: self.node_range(member),
                 });
@@ -1931,33 +1931,55 @@ impl ParserEngine {
         }
     }
 
-    /// The base path of a member access, root first (`w.token` → ["w", "token"]).
-    fn base_chain(&self, node: Node, source: &[u8]) -> Vec<String> {
-        if node.kind() == "member_access_expr" {
-            let mut chain = node
-                .child_by_field_name("base")
-                .map(|base| self.base_chain(base, source))
-                .unwrap_or_default();
-            if let Some(member) = node.child_by_field_name("member") {
-                chain.push(self.node_text(member, source));
+    /// Model a member-access base expression (`w.token`, `make()`, `arr[i]`).
+    fn member_base(&self, node: Node, source: &[u8]) -> MemberBase {
+        match node.kind() {
+            "id" => MemberBase::Path(vec![self.node_text(node, source)]),
+            "member_access_expr" => {
+                let base = node
+                    .child_by_field_name("base")
+                    .map(|base| self.member_base(base, source));
+                let member = node
+                    .child_by_field_name("member")
+                    .map(|member| self.node_text(member, source));
+                match (base, member) {
+                    (Some(MemberBase::Path(mut path)), Some(member)) => {
+                        path.push(member);
+                        MemberBase::Path(path)
+                    }
+                    _ => MemberBase::Other,
+                }
             }
-            return chain;
-        }
-        if node.kind() == "id" {
-            return vec![self.node_text(node, source)];
-        }
-        // `term` and other wrappers: take the first nested identifier.
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "id" {
-                return vec![self.node_text(child, source)];
+            "function_call_term" => match node
+                .child_by_field_name("fun")
+                .and_then(|fun| fun.child_by_field_name("id"))
+            {
+                Some(id) => MemberBase::Call(self.node_text(id, source)),
+                None => MemberBase::Other,
+            },
+            "index_access_expr" => match node.child_by_field_name("base") {
+                Some(base) => MemberBase::Index(Box::new(self.member_base(base, source))),
+                None => MemberBase::Other,
+            },
+            "term" | "expr" | "expr_seq" | "expr_seq_term" => {
+                let mut cursor = node.walk();
+                node.named_children(&mut cursor)
+                    .next()
+                    .map(|child| self.member_base(child, source))
+                    .unwrap_or(MemberBase::Other)
             }
-            let mut inner = child.walk();
-            if let Some(id) = child.children(&mut inner).find(|c| c.kind() == "id") {
-                return vec![self.node_text(id, source)];
-            }
+            _ => MemberBase::Other,
         }
-        Vec::new()
+    }
+
+    /// Human-readable rendering of a member base, for hover/definition text.
+    fn member_base_display(base: &MemberBase) -> String {
+        match base {
+            MemberBase::Path(path) => path.join("."),
+            MemberBase::Call(callee) => format!("{}()", callee),
+            MemberBase::Index(inner) => format!("{}[]", Self::member_base_display(inner)),
+            MemberBase::Other => String::new(),
+        }
     }
 
     /// Whether a `struct` named `name` is declared in this file.
@@ -2023,6 +2045,14 @@ impl ParserEngine {
         let source_bytes = source.as_bytes();
         let raw = self.find_variable_type(root, root, source_bytes, variable_name)?;
         Some(self.resolve_type_name(root, source_bytes, &raw))
+    }
+
+    /// Like [`Self::get_variable_type`], but returns the declared type text
+    /// unchanged (generics preserved) — needed for element-type extraction.
+    pub fn get_variable_type_raw(&mut self, source: &str, variable_name: &str) -> Option<String> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        self.find_variable_type(root, root, source.as_bytes(), variable_name)
     }
 
     /// Resolve a written type name through same-file `type` aliases.
@@ -2361,15 +2391,15 @@ impl ParserEngine {
             {
                 let member_node = node.child_by_field_name("member")?;
                 let base_node = node.child_by_field_name("base")?;
-                let base_chain = self.base_chain(base_node, source.as_bytes());
-                if base_chain.is_empty() {
+                let base = self.member_base(base_node, source.as_bytes());
+                if base == MemberBase::Other {
                     return None;
                 }
-                let base_name = base_chain.join(".");
+                let base_name = Self::member_base_display(&base);
                 let member_name = self.node_text(member_node, source.as_bytes());
                 return Some(MemberAccessContext {
                     base_name,
-                    base_chain,
+                    base,
                     member_name,
                     member_range: self.node_range(member_node),
                 });
@@ -3228,7 +3258,7 @@ circuit useIt(a: Token, b: Token): Boolean {
         let uses = parser.collect_member_accesses(source, "transfer");
         assert_eq!(uses.len(), 2);
         assert_eq!(uses[0].base_name, "a");
-        assert_eq!(uses[0].base_chain, vec!["a"]);
+        assert_eq!(uses[0].base, MemberBase::Path(vec!["a".to_string()]));
         assert_eq!(uses[1].base_name, "b");
         assert!(parser.collect_member_accesses(source, "missing").is_empty());
 
@@ -3242,7 +3272,10 @@ circuit g(w: Wallet): Boolean {
         let uses = parser.collect_member_accesses(chained, "transfer");
         assert_eq!(uses.len(), 1);
         assert_eq!(uses[0].base_name, "w.token");
-        assert_eq!(uses[0].base_chain, vec!["w", "token"]);
+        assert_eq!(
+            uses[0].base,
+            MemberBase::Path(vec!["w".to_string(), "token".to_string()])
+        );
     }
 
     #[test]
@@ -3298,8 +3331,79 @@ circuit f(a: Account): Boolean {
             .get_member_access_context(source, line, col)
             .expect("member access context");
         assert_eq!(ctx.base_name, "a.wallet.token");
-        assert_eq!(ctx.base_chain, vec!["a", "wallet", "token"]);
+        assert_eq!(
+            ctx.base,
+            MemberBase::Path(vec![
+                "a".to_string(),
+                "wallet".to_string(),
+                "token".to_string()
+            ])
+        );
         assert_eq!(ctx.member_name, "transfer");
+    }
+
+    #[test]
+    fn test_member_base_call_and_index() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token { circuit transfer(to: Address): Boolean; }
+circuit make(): Token { }
+circuit useCall(): Boolean {
+    return make().transfer(0);
+}
+ledger items: Map<Address, Token>;
+circuit useIndex(): Boolean {
+    return items[0].transfer(0);
+}
+"#;
+        let line = 4;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("call base context");
+        assert_eq!(ctx.base, MemberBase::Call("make".to_string()));
+        assert_eq!(ctx.member_name, "transfer");
+
+        let line = 8;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("index base context");
+        assert_eq!(
+            ctx.base,
+            MemberBase::Index(Box::new(MemberBase::Path(vec!["items".to_string()])))
+        );
+    }
+
+    #[test]
+    fn test_get_variable_type_raw_preserves_generics() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+ledger items: Map<Address, Token>;
+circuit f(): Boolean { return true; }
+"#;
+        assert_eq!(
+            parser.get_variable_type_raw(source, "items").as_deref(),
+            Some("Map<Address, Token>")
+        );
+        // `get_variable_type` strips generics to the head type name.
+        assert_eq!(
+            parser.get_variable_type(source, "items").as_deref(),
+            Some("Map")
+        );
+
+        // Parameter (`parg`) types preserve generics too.
+        let parg_src = r#"
+circuit useIt(items: Vector<10, T_Token>): Boolean {
+    return true;
+}
+"#;
+        assert_eq!(
+            parser.get_variable_type_raw(parg_src, "items").as_deref(),
+            Some("Vector<10, T_Token>")
+        );
     }
 
     #[test]

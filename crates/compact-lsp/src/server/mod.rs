@@ -25,7 +25,7 @@ use std::sync::Mutex;
 
 use compact_analyzer::{
     CompletionSymbol, CompletionSymbolKind, ContractTypeInfo, DiagnosticEngine, FormatterEngine,
-    LanguageVersion, ParserEngine, SymbolLocation,
+    LanguageVersion, MemberBase, ParserEngine, SymbolLocation,
 };
 use dashmap::DashMap;
 use lsp_types::*;
@@ -686,55 +686,70 @@ impl CompactLanguageServer {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.get_initializer_callee(content, var_name)
         }?;
-        let (callee_uri, callee_symbol) = self.find_symbol_anywhere(uri, &callee)?;
+        let (raw, scope_uri) = self.resolve_callee_raw_type(uri, &callee)?;
+        let name = self.resolve_alias_in(&scope_uri, &raw);
+        self.resolve_contract_type(&scope_uri, &name)
+    }
+
+    /// Resolve a callee's declared return type and the file scope it lives in.
+    fn resolve_callee_raw_type(&self, uri: &str, callee: &str) -> Option<(String, String)> {
+        let (callee_uri, callee_symbol) = self.find_symbol_anywhere(uri, callee)?;
         let callee_content = self.source_for(&callee_uri)?;
-        let return_type = {
+        let raw = {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.get_callable_return_type(&callee_content, &callee_symbol.name)?
         };
-        let aliased = {
-            let mut parser = self.parser_engine.lock().unwrap();
-            parser.resolve_alias(&callee_content, &return_type)
-        };
-        self.resolve_contract_type(&callee_uri, &aliased)
+        Some((raw, callee_uri))
     }
 
-    /// Resolve the declared type name of a `base.member...` chain and the file
-    /// scope in which that name is written, following struct fields and aliases.
-    fn resolve_base_type_name(
+    /// Resolve a member-access base to its declared type text and the file scope
+    /// in which that text is written. Generics are preserved (needed to extract
+    /// a container's element type for index access).
+    fn resolve_base_raw_type(
         &self,
         uri: &str,
         content: &str,
-        chain: &[String],
+        base: &MemberBase,
     ) -> Option<(String, String)> {
-        let root = chain.first()?;
-        let mut name = {
-            let mut parser = self.parser_engine.lock().unwrap();
-            parser.get_variable_type(content, root)?
-        };
-        let mut scope_uri = uri.to_string();
-        let mut scope_content = content.to_string();
-
-        for member in &chain[1..] {
-            let (struct_uri, struct_content, struct_name) =
-                self.find_struct_home(&scope_uri, &scope_content, &name)?;
-            let field_type = {
-                let mut parser = self.parser_engine.lock().unwrap();
-                parser.get_struct_field_type(&struct_content, &struct_name, member)?
-            };
-            name = {
-                let mut parser = self.parser_engine.lock().unwrap();
-                parser.resolve_alias(&struct_content, &field_type)
-            };
-            scope_uri = struct_uri;
-            scope_content = struct_content;
+        match base {
+            MemberBase::Path(chain) => {
+                let root = chain.first()?;
+                let mut raw = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.get_variable_type_raw(content, root)?
+                };
+                let mut scope_uri = uri.to_string();
+                let mut scope_content = content.to_string();
+                for member in &chain[1..] {
+                    let (struct_uri, struct_content, struct_name) =
+                        self.find_struct_home(&scope_uri, &scope_content, &raw)?;
+                    raw = {
+                        let mut parser = self.parser_engine.lock().unwrap();
+                        parser.get_struct_field_type(&struct_content, &struct_name, member)?
+                    };
+                    scope_uri = struct_uri;
+                    scope_content = struct_content;
+                }
+                Some((raw, scope_uri))
+            }
+            MemberBase::Call(callee) => self.resolve_callee_raw_type(uri, callee),
+            MemberBase::Index(inner) => {
+                let (container, scope_uri) = self.resolve_base_raw_type(uri, content, inner)?;
+                Some((element_type(&container)?, scope_uri))
+            }
+            MemberBase::Other => None,
         }
+    }
 
-        let name = {
-            let mut parser = self.parser_engine.lock().unwrap();
-            parser.resolve_alias(&scope_content, &name)
-        };
-        Some((name, scope_uri))
+    /// Follow aliases for a type name written in `scope_uri`'s file.
+    fn resolve_alias_in(&self, scope_uri: &str, name: &str) -> String {
+        match self.source_for(scope_uri) {
+            Some(content) => {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.resolve_alias(&content, name)
+            }
+            None => name.to_string(),
+        }
     }
 
     /// Locate the file that declares a struct `name` (following aliases),
@@ -765,18 +780,20 @@ impl CompactLanguageServer {
         Some((file_uri, file_content, local))
     }
 
-    /// Resolve the contract type of an expression base `base_chain`, which may
-    /// be a struct field path such as `w.token`.
+    /// Resolve the contract type of a member-access base expression.
     fn resolve_base_contract_type(
         &self,
         uri: &str,
         content: &str,
-        base_chain: &[String],
+        base: &MemberBase,
     ) -> Option<(String, ContractTypeInfo)> {
-        if base_chain.len() == 1 {
-            return self.resolve_variable_contract_type(uri, content, &base_chain[0]);
+        if let MemberBase::Path(chain) = base
+            && chain.len() == 1
+        {
+            return self.resolve_variable_contract_type(uri, content, &chain[0]);
         }
-        let (name, scope_uri) = self.resolve_base_type_name(uri, content, base_chain)?;
+        let (raw, scope_uri) = self.resolve_base_raw_type(uri, content, base)?;
+        let name = self.resolve_alias_in(&scope_uri, &raw);
         self.resolve_contract_type(&scope_uri, &name)
     }
 
@@ -805,8 +822,7 @@ impl CompactLanguageServer {
             let mut parser = self.parser_engine.lock().unwrap();
             parser.get_member_access_context(content, line, character)
         }?;
-        let (file_uri, contract) =
-            self.resolve_base_contract_type(uri, content, &member.base_chain)?;
+        let (file_uri, contract) = self.resolve_base_contract_type(uri, content, &member.base)?;
         if contract
             .circuits
             .iter()
@@ -859,7 +875,7 @@ impl CompactLanguageServer {
             };
             for use_ctx in uses {
                 let Some((resolved_uri, resolved_contract)) =
-                    self.resolve_base_contract_type(file_uri, file_content, &use_ctx.base_chain)
+                    self.resolve_base_contract_type(file_uri, file_content, &use_ctx.base)
                 else {
                     continue;
                 };
@@ -1262,12 +1278,12 @@ impl LanguageServer for CompactLanguageServer {
 
             if let Some(var_name) = var_name {
                 tracing::debug!("Dot completion: base variable = {}", var_name);
-                let chain: Vec<String> = var_name.split('.').map(str::to_string).collect();
+                let base = parse_base_text(&var_name);
 
                 // Contract type? Offer its declared circuits (cross-contract calls).
                 // Covers annotations, aliases, inference, and struct-field chains.
                 if let Some((_file, contract)) =
-                    self.resolve_base_contract_type(&uri, &content, &chain)
+                    self.resolve_base_contract_type(&uri, &content, &base)
                     && !contract.circuits.is_empty()
                 {
                     let items: Vec<CompletionItem> = contract
@@ -1292,8 +1308,8 @@ impl LanguageServer for CompactLanguageServer {
                 }
 
                 let var_type = self
-                    .resolve_base_type_name(&uri, &content, &chain)
-                    .map(|(name, _scope)| name)
+                    .resolve_base_raw_type(&uri, &content, &base)
+                    .map(|(raw, scope_uri)| self.resolve_alias_in(&scope_uri, &raw))
                     .or_else(|| {
                         // `kernel` is implicitly available without a ledger declaration.
                         if var_name == "kernel" {
@@ -1942,7 +1958,7 @@ impl LanguageServer for CompactLanguageServer {
         if let Some(ctx) = member_ctx {
             // Contract-type circuit? (annotation / alias / inference / struct-field chain.)
             if let Some((_file, contract)) =
-                self.resolve_base_contract_type(&uri, &content, &ctx.base_chain)
+                self.resolve_base_contract_type(&uri, &content, &ctx.base)
                 && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
             {
                 let signature = circuit
@@ -2087,7 +2103,7 @@ impl LanguageServer for CompactLanguageServer {
         if let Some(ctx) = member_ctx {
             // Contract-type circuit? (annotation / alias / inference, same or cross file.)
             if let Some((file_uri, contract)) =
-                self.resolve_base_contract_type(&uri_string, &content, &ctx.base_chain)
+                self.resolve_base_contract_type(&uri_string, &content, &ctx.base)
                 && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
             {
                 let target_uri = match Uri::from_str(&file_uri) {
@@ -2270,7 +2286,7 @@ impl LanguageServer for CompactLanguageServer {
         };
         if let Some(ctx) = member_call
             && let Some((_file, contract)) =
-                self.resolve_base_contract_type(&uri, &content, &ctx.base_chain)
+                self.resolve_base_contract_type(&uri, &content, &ctx.base)
             && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
         {
             let active_param =
@@ -2656,6 +2672,63 @@ impl LanguageServer for CompactLanguageServer {
             change_annotations: None,
         }))
     }
+}
+
+/// Parse a text-extracted base (`w.token`, `make()`, `items[0]`) into a
+/// [`MemberBase`] for completion, where the AST is not available.
+fn parse_base_text(text: &str) -> MemberBase {
+    if let Some(open) = text.find('[') {
+        return MemberBase::Index(Box::new(parse_base_text(&text[..open])));
+    }
+    if let Some(paren) = text.find('(') {
+        let callee = text[..paren].trim();
+        return if callee.is_empty() {
+            MemberBase::Other
+        } else {
+            MemberBase::Call(callee.to_string())
+        };
+    }
+    if text.is_empty() {
+        MemberBase::Other
+    } else {
+        MemberBase::Path(text.split('.').map(str::to_string).collect())
+    }
+}
+
+/// The element type of a generic container (`Map<K, V>` → `V`, `Vector<T>` → `T`).
+fn element_type(type_text: &str) -> Option<String> {
+    let open = type_text.find('<')?;
+    let close = type_text.rfind('>')?;
+    if close <= open + 1 {
+        return None;
+    }
+    let inner = &type_text[open + 1..close];
+    let mut depth = 0i32;
+    let mut last = String::new();
+    let mut current = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '<' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    last = current.trim().to_string();
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        last = current.trim().to_string();
+    }
+    if last.is_empty() { None } else { Some(last) }
 }
 
 /// Canonical filesystem key for a `file://` URI, tolerating canonicalization

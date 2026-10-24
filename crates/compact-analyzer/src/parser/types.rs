@@ -138,13 +138,26 @@ pub enum SemanticTokenModifier {
     DefaultLibrary = 2,
 }
 
+/// The base expression of a member access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberBase {
+    /// A dotted identifier path, root first (`w.token` → ["w", "token"]).
+    Path(Vec<String>),
+    /// A call to a circuit/function (`make()`, `F_make()`).
+    Call(String),
+    /// An index access (`arr[i]` → container `arr`).
+    Index(Box<MemberBase>),
+    /// A base we don't model.
+    Other,
+}
+
 /// Context from a member access expression (e.g., `round.increment`).
 #[derive(Debug, Clone)]
 pub struct MemberAccessContext {
-    /// The base path as written (e.g., "round", "w.token").
+    /// The base expression as written (e.g., "round", "w.token", "make()").
     pub base_name: String,
-    /// The base path split into identifiers (e.g., ["w", "token"]).
-    pub base_chain: Vec<String>,
+    /// The structured base expression.
+    pub base: MemberBase,
     /// The member identifier name (e.g., "increment").
     pub member_name: String,
     /// The range of the member identifier.

@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`w.token.transfer(...)`, nested `a.wallet.token.transfer(...)`, and structs imported from
   another file) now resolves for completion, hover, definition, signature help,
   find-references, and rename.
+- **Expression bases** for contract references: `make().circuit(...)` resolves via the callee's
+  declared return type and `items[i].circuit(...)` via the container's element type
+  (`Map<K, V>` → `V`, `Vector<n, T>` → `T`, `List<T>` → `T`, …). All member features and
+  find-references/rename are covered.
 
 ## [0.3.0] - 2026-10-24
 
