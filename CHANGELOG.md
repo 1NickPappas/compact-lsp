@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
 ### Added
 - **Cross-contract-call intelligence** (Compact 0.26+):
   - contract types (`contract Token { … }`) are indexed for completion and workspace symbols;
