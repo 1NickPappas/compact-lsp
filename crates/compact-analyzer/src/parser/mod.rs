@@ -2913,6 +2913,63 @@ circuit g(): Uint<64> {
     }
 
     #[test]
+    fn test_variable_type_alias_cycle_terminates() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+type A = B;
+type B = A;
+
+circuit f(x: A): Boolean {
+    return x;
+}
+"#;
+        // A cyclic alias chain must terminate rather than loop forever.
+        assert!(parser.get_variable_type(source, "x").is_some());
+    }
+
+    #[test]
+    fn test_variable_type_generic_alias_skipped() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+type Box<T> = Token;
+
+circuit f(ref: Box<Uint<64>>): Boolean {
+    return ref.transfer(0);
+}
+"#;
+        // Generic aliases are not substituted; the head name is returned as-is.
+        assert_eq!(
+            parser.get_variable_type(source, "ref").as_deref(),
+            Some("Box")
+        );
+    }
+
+    #[test]
+    fn test_variable_type_inferred_from_witness_return() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+witness make(): Token;
+
+circuit f(): Boolean {
+    const t = make();
+    return t.transfer(0);
+}
+"#;
+        assert_eq!(
+            parser.get_variable_type(source, "t").as_deref(),
+            Some("Token")
+        );
+    }
+
+    #[test]
     fn test_enclosing_member_call() {
         let mut parser = ParserEngine::new();
         let source = r#"
