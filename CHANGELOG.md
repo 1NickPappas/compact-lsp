@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Rust toolchain / edition:** upgraded CI and the pinned toolchain to Rust **1.99.1**, migrated
+  the workspace to **edition 2024**, enabled the MSRV-aware `resolver = "3"`, and corrected the
+  declared MSRV (`rust-version`) from `1.70` to **`1.90`** (the real floor, set by
+  `tree-sitter` 0.27). `cargo fix --edition` + `cargo clippy --fix` modernized nested `if`/`if let`
+  blocks into let-chains.
+
 ## [0.2.2] - 2026-10-24
 
 ### Added

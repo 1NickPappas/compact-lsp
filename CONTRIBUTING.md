@@ -12,7 +12,7 @@ Thank you for your interest in contributing to compact-lsp! This document provid
 
 ### Prerequisites
 
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
+- Rust 1.90+ (install via [rustup](https://rustup.rs/))
 - `compactc` compiler (for diagnostics)
 - `format-compact` (for formatting)
 

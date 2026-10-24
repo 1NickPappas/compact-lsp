@@ -39,20 +39,21 @@ impl FormatterEngine {
     /// 4. `format-compact` on `PATH`
     fn find_formatter() -> Option<String> {
         // 1. Check environment variable
-        if let Ok(path) = std::env::var("COMPACT_FORMATTER") {
-            if !path.is_empty() && Path::new(&path).exists() {
-                tracing::info!("Found formatter via COMPACT_FORMATTER env: {}", path);
-                return Some(path);
-            }
+        if let Ok(path) = std::env::var("COMPACT_FORMATTER")
+            && !path.is_empty()
+            && Path::new(&path).exists()
+        {
+            tracing::info!("Found formatter via COMPACT_FORMATTER env: {}", path);
+            return Some(path);
         }
 
         // 2. Compact devtools active toolchain (format-compact is symlinked
         //    directly to the real binary).
-        if let Some(dir) = compact_directory() {
-            if let Some(path) = resolve_devtools_binary(&dir, "format-compact", "format-compact") {
-                tracing::info!("Found formatter via Compact devtools: {}", path);
-                return Some(path);
-            }
+        if let Some(dir) = compact_directory()
+            && let Some(path) = resolve_devtools_binary(&dir, "format-compact", "format-compact")
+        {
+            tracing::info!("Found formatter via Compact devtools: {}", path);
+            return Some(path);
         }
 
         // 3. Check ~/compactc/format-compact
@@ -69,13 +70,12 @@ impl FormatterEngine {
         if let Ok(output) = std::process::Command::new("which")
             .arg("format-compact")
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    tracing::info!("Found formatter in PATH: {}", path);
-                    return Some(path);
-                }
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                tracing::info!("Found formatter in PATH: {}", path);
+                return Some(path);
             }
         }
 

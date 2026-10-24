@@ -17,8 +17,9 @@ pub mod version;
 pub use diagnostics::DiagnosticEngine;
 pub use formatter::FormatterEngine;
 pub use parser::{
-    is_builtin_type, CompletionSymbol, CompletionSymbolKind, DefinitionLocation, HoverInfo,
-    ImportInfo, MemberAccessContext, ParameterInfo, ParserEngine, ReferenceLocation, SemanticToken,
+    CompletionSymbol, CompletionSymbolKind, DefinitionLocation, HoverInfo, ImportInfo,
+    MemberAccessContext, ParameterInfo, ParserEngine, ReferenceLocation, SemanticToken,
     SemanticTokenModifier, SemanticTokenType, SignatureInfo, SymbolLocation, SyntaxError,
+    is_builtin_type,
 };
 pub use version::LanguageVersion;

@@ -22,10 +22,10 @@ fn find_compact_files_recursive(dir: &str, files: &mut Vec<String>) -> io::Resul
             if !name.starts_with('.') && name != "node_modules" && name != "target" {
                 find_compact_files_recursive(path.to_str().unwrap_or(""), files)?;
             }
-        } else if path.extension().map(|e| e == "compact").unwrap_or(false) {
-            if let Some(path_str) = path.to_str() {
-                files.push(path_str.to_string());
-            }
+        } else if path.extension().map(|e| e == "compact").unwrap_or(false)
+            && let Some(path_str) = path.to_str()
+        {
+            files.push(path_str.to_string());
         }
     }
 
