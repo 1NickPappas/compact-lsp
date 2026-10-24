@@ -147,12 +147,26 @@ fn type_param_names(type_name: &str) -> Vec<&'static str> {
         .find(|t| t.name == type_name)
         .map(|t| t.type_params)
         .unwrap_or("");
-    raw.trim_start_matches('<')
+    parse_type_params(raw)
+}
+
+/// Parse the parameter names out of a `<...>` declaration (`<K, V>` → `["K", "V"]`).
+fn parse_type_params(type_params: &str) -> Vec<&str> {
+    type_params
+        .trim()
+        .trim_start_matches('<')
         .trim_end_matches('>')
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Substitute generic parameter identifiers declared in `type_params` (`<K, V>`)
+/// with `type_args` throughout `text`. Shared with the stdlib registry.
+pub fn substitute_generic_params(text: &str, type_params: &str, type_args: &[String]) -> String {
+    let params = parse_type_params(type_params);
+    substitute_generics(text, &params, type_args)
 }
 
 /// The declared return type of a method signature (`lookup(key: K): V` → `V`).

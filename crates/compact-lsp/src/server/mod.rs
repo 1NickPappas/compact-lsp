@@ -756,6 +756,28 @@ impl CompactLanguageServer {
                 let (container, scope_uri) = self.resolve_base_raw_type(uri, content, inner)?;
                 Some((element_type(&container)?, scope_uri))
             }
+            MemberBase::Access(receiver, field) => {
+                let (recv_raw, scope_uri) = self.resolve_base_raw_type(uri, content, receiver)?;
+                let head = builtins::extract_base_type(&recv_raw).trim();
+                // (a) A struct declared in the workspace.
+                let scope_content = self
+                    .source_for(&scope_uri)
+                    .unwrap_or_else(|| content.to_string());
+                if let Some((struct_uri, struct_content, struct_name)) =
+                    self.find_struct_home(&scope_uri, &scope_content, &recv_raw)
+                {
+                    let field_type = {
+                        let mut parser = self.parser_engine.lock().unwrap();
+                        parser.get_struct_field_type(&struct_content, &struct_name, field)
+                    }?;
+                    return Some((field_type, struct_uri));
+                }
+                // (b) A standard-library struct (`Maybe`, `Either`, …), with
+                //     the receiver's generic arguments substituted.
+                let args = generic_args(&recv_raw);
+                let field_type = stdlib::struct_field_type(head, &args, field)?;
+                Some((field_type, scope_uri))
+            }
             MemberBase::Other => None,
         }
     }
@@ -2720,6 +2742,17 @@ fn parse_base_text(text: &str) -> MemberBase {
         && let Some(open) = matching_open(text, '[', ']')
     {
         return MemberBase::Index(Box::new(parse_base_text(&text[..open])));
+    }
+    // Trailing field access on a non-path receiver: `call().field`,
+    // `arr[i].field`. Only reached when the text contains a call/index.
+    if (text.contains('(') || text.contains('['))
+        && let Some(dot) = text.rfind('.')
+    {
+        let (receiver, field) = text.split_at(dot);
+        let field = &field[1..];
+        if !receiver.is_empty() && !field.is_empty() {
+            return MemberBase::Access(Box::new(parse_base_text(receiver)), field.to_string());
+        }
     }
     MemberBase::Path(text.split('.').map(str::to_string).collect())
 }

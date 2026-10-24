@@ -1949,11 +1949,15 @@ impl ParserEngine {
                     (Some(base), Some(member)) => {
                         if is_call {
                             MemberBase::MethodCall(Box::new(base), member)
-                        } else if let MemberBase::Path(mut path) = base {
-                            path.push(member);
-                            MemberBase::Path(path)
                         } else {
-                            MemberBase::Other
+                            match base {
+                                MemberBase::Path(mut path) => {
+                                    path.push(member);
+                                    MemberBase::Path(path)
+                                }
+                                MemberBase::Other => MemberBase::Other,
+                                other => MemberBase::Access(Box::new(other), member),
+                            }
                         }
                     }
                     _ => MemberBase::Other,
@@ -1988,6 +1992,9 @@ impl ParserEngine {
             MemberBase::Call(callee) => format!("{}()", callee),
             MemberBase::MethodCall(receiver, method) => {
                 format!("{}.{}()", Self::member_base_display(receiver), method)
+            }
+            MemberBase::Access(receiver, field) => {
+                format!("{}.{}", Self::member_base_display(receiver), field)
             }
             MemberBase::Index(inner) => format!("{}[]", Self::member_base_display(inner)),
             MemberBase::Other => String::new(),
@@ -3431,6 +3438,35 @@ circuit useIt(factory: Factory, tokens: Map<Address, Token>): Boolean {
             )
         );
         assert_eq!(ctx.base_name, "tokens.lookup()");
+    }
+
+    #[test]
+    fn test_member_base_access_on_call() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit useIt(items: List<Token>): Boolean {
+    items.head().value.transfer(0);
+    return true;
+}
+"#;
+        let line = 2;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("field-on-method-call base");
+        assert_eq!(
+            ctx.base,
+            MemberBase::Access(
+                Box::new(MemberBase::MethodCall(
+                    Box::new(MemberBase::Path(vec!["items".to_string()])),
+                    "head".to_string()
+                )),
+                "value".to_string()
+            )
+        );
+        assert_eq!(ctx.base_name, "items.head().value");
+        assert_eq!(ctx.member_name, "transfer");
     }
 
     #[test]

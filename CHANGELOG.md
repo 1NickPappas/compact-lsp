@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tokens.lookup(k).transfer(...)` resolves a built-in method's return type from the registry with
   the receiver's generic arguments substituted (`Map<K, V>` → `V`). All member features and
   find-references/rename are covered.
+- **Field access on a method result**: `items.head().value.transfer(...)` resolves — the method's
+  return type is used as the container type and the field type is read from the workspace struct or
+  the standard-library registry (`Maybe<T>.value` → `T`, `Either<A, B>.left` → `A`), with the
+  receiver's generic arguments substituted.
 
 ## [0.4.0] - 2026-10-24
 

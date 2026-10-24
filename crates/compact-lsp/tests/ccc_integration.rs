@@ -1140,3 +1140,43 @@ circuit useIt(): Boolean {
     assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
     client.shutdown();
 }
+
+/// Field access on a method result:
+/// `items.head().value.transfer(...)` — `List<T>.head()` returns `Maybe<T>`,
+/// whose `value` field is `T`. Exercises stdlib field resolution + generic
+/// substitution on top of a method-call base.
+#[test]
+fn test_member_access_on_method_result() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+ledger items: List<T_Token>;
+
+circuit useIt(): Boolean {
+    return items.head().value.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
+    client.shutdown();
+}

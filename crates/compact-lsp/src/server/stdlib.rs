@@ -203,6 +203,23 @@ pub fn find_stdlib_circuit(name: &str) -> Option<&'static StdlibCircuit> {
     stdlib().circuits.iter().find(|c| c.name == name)
 }
 
+/// The declared type of a field on a stdlib struct, with the receiver's
+/// generic arguments substituted (`Maybe<Token>.value` → `Token`,
+/// `Either<A, B>.left` → `A`).
+pub fn struct_field_type(
+    struct_name: &str,
+    type_args: &[String],
+    field_name: &str,
+) -> Option<String> {
+    let st = find_stdlib_struct(struct_name)?;
+    let field = st.fields.iter().find(|f| f.name == field_name)?;
+    Some(super::builtins::substitute_generic_params(
+        field.type_str,
+        st.type_params,
+        type_args,
+    ))
+}
+
 /// Find a stdlib struct by name, respecting the detected language version.
 pub fn find_stdlib_struct_for(
     name: &str,

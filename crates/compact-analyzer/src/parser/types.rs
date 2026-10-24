@@ -147,6 +147,8 @@ pub enum MemberBase {
     Call(String),
     /// A method call on a receiver (`factory.create()`, `map.lookup(k)`).
     MethodCall(Box<MemberBase>, String),
+    /// Field access on a non-path receiver (`list.head().value`, `arr[i].field`).
+    Access(Box<MemberBase>, String),
     /// An index access (`arr[i]` → container `arr`).
     Index(Box<MemberBase>),
     /// A base we don't model.
