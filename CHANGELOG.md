@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a contract reference (`ref: Token`) gets member completion, hover, go-to-definition, and
     signature help for `ref.circuit(...)`, including contract types imported from other files.
 - Member accesses are emitted as method/property semantic tokens.
-- An end-to-end LSP integration test (`crates/compact-lsp/tests/ccc_integration.rs`) covering
-  member completion, hover, signature help, definition, and `contract implements` completion.
+- End-to-end LSP integration tests (`crates/compact-lsp/tests/ccc_integration.rs`) covering
+  same-file and **cross-file** contract types: unprefixed imports, `prefix` imports, and a
+  defining file that is not open (resolved via the workspace scan).
 - **Compact 0.34/0.35 support** (language 0.26/0.27): registry entries for `PublicAddress`,
   `kernel.caller()`, `sha512`, `jubjubSchnorrVerify`, `secp256r1EcdsaVerify`, `ed25519Verify`,
   the secp256r1/Curve25519 field and point types, and their signature structs. All are
