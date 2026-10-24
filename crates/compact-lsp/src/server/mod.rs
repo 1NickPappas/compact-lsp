@@ -733,6 +733,25 @@ impl CompactLanguageServer {
                 Some((raw, scope_uri))
             }
             MemberBase::Call(callee) => self.resolve_callee_raw_type(uri, callee),
+            MemberBase::MethodCall(receiver, method) => {
+                let (recv_raw, scope_uri) = self.resolve_base_raw_type(uri, content, receiver)?;
+                let head = builtins::extract_base_type(&recv_raw).trim();
+                let aliased = self.resolve_alias_in(&scope_uri, head);
+                // (a) The receiver is a contract type: use the called circuit's
+                //     declared return type, written in the contract's own file.
+                if let Some((contract_uri, contract)) =
+                    self.resolve_contract_type(&scope_uri, &aliased)
+                    && let Some(circuit) = contract.circuits.iter().find(|c| c.name == *method)
+                    && let Some(ret) = return_type_of_signature(&circuit.detail)
+                {
+                    return Some((ret, contract_uri));
+                }
+                // (b) The receiver is a built-in container: use the registry's
+                //     declared return type with generic arguments substituted.
+                let args = generic_args(&recv_raw);
+                let ret = builtins::method_return_type(head, &args, method)?;
+                Some((ret, scope_uri))
+            }
             MemberBase::Index(inner) => {
                 let (container, scope_uri) = self.resolve_base_raw_type(uri, content, inner)?;
                 Some((element_type(&container)?, scope_uri))
@@ -2674,37 +2693,73 @@ impl LanguageServer for CompactLanguageServer {
     }
 }
 
-/// Parse a text-extracted base (`w.token`, `make()`, `items[0]`) into a
-/// [`MemberBase`] for completion, where the AST is not available.
+/// Parse a text-extracted base (`w.token`, `make()`, `items[0]`,
+/// `factory.create()`, `items[0].get()`) into a [`MemberBase`] for completion,
+/// where the AST is not available. Peels from the outside in (trailing call,
+/// then trailing index, then a plain path), so nested bases compose.
 fn parse_base_text(text: &str) -> MemberBase {
-    if let Some(open) = text.find('[') {
-        return MemberBase::Index(Box::new(parse_base_text(&text[..open])));
+    let text = text.trim();
+    if text.is_empty() {
+        return MemberBase::Other;
     }
-    if let Some(paren) = text.find('(') {
-        let callee = text[..paren].trim();
-        return if callee.is_empty() {
-            MemberBase::Other
-        } else {
-            MemberBase::Call(callee.to_string())
+    // Trailing call: `receiver.method(...)` or `callee(...)`.
+    if text.ends_with(')')
+        && let Some(open) = matching_open(text, '(', ')')
+    {
+        let callee = text[..open].trim();
+        return match callee.rsplit_once('.') {
+            Some((receiver, method)) if !receiver.is_empty() && !method.is_empty() => {
+                MemberBase::MethodCall(Box::new(parse_base_text(receiver)), method.to_string())
+            }
+            _ if !callee.is_empty() => MemberBase::Call(callee.to_string()),
+            _ => MemberBase::Other,
         };
     }
-    if text.is_empty() {
-        MemberBase::Other
-    } else {
-        MemberBase::Path(text.split('.').map(str::to_string).collect())
+    // Trailing index: `receiver[expr]`.
+    if text.ends_with(']')
+        && let Some(open) = matching_open(text, '[', ']')
+    {
+        return MemberBase::Index(Box::new(parse_base_text(&text[..open])));
     }
+    MemberBase::Path(text.split('.').map(str::to_string).collect())
+}
+
+/// The index of the opening bracket matching the final closing bracket.
+fn matching_open(text: &str, open: char, close: char) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in text.char_indices().rev() {
+        if c == close {
+            depth += 1;
+        } else if c == open {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 /// The element type of a generic container (`Map<K, V>` → `V`, `Vector<T>` → `T`).
 fn element_type(type_text: &str) -> Option<String> {
-    let open = type_text.find('<')?;
-    let close = type_text.rfind('>')?;
+    generic_args(type_text).pop()
+}
+
+/// Top-level generic arguments of a type expression
+/// (`Map<Address, Token>` → `["Address", "Token"]`).
+fn generic_args(type_text: &str) -> Vec<String> {
+    let Some(open) = type_text.find('<') else {
+        return Vec::new();
+    };
+    let Some(close) = type_text.rfind('>') else {
+        return Vec::new();
+    };
     if close <= open + 1 {
-        return None;
+        return Vec::new();
     }
     let inner = &type_text[open + 1..close];
     let mut depth = 0i32;
-    let mut last = String::new();
+    let mut args = Vec::new();
     let mut current = String::new();
     for ch in inner.chars() {
         match ch {
@@ -2718,7 +2773,7 @@ fn element_type(type_text: &str) -> Option<String> {
             }
             ',' if depth == 0 => {
                 if !current.trim().is_empty() {
-                    last = current.trim().to_string();
+                    args.push(current.trim().to_string());
                 }
                 current.clear();
             }
@@ -2726,9 +2781,21 @@ fn element_type(type_text: &str) -> Option<String> {
         }
     }
     if !current.trim().is_empty() {
-        last = current.trim().to_string();
+        args.push(current.trim().to_string());
     }
-    if last.is_empty() { None } else { Some(last) }
+    args
+}
+
+/// The return type declared after `): ` in a signature or circuit detail
+/// (`(to: Address): Boolean` → `Boolean`).
+fn return_type_of_signature(signature: &str) -> Option<String> {
+    let (_, ret) = signature.rsplit_once("): ")?;
+    let ret = ret.trim();
+    if ret.is_empty() {
+        None
+    } else {
+        Some(ret.to_string())
+    }
 }
 
 /// Canonical filesystem key for a `file://` URI, tolerating canonicalization

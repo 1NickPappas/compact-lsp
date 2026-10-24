@@ -173,38 +173,21 @@ fn open(client: &mut LspClient, uri: &str, text: &str) {
     );
 }
 
-/// Assert the full member-feature set for `ref.transfer(...)` in `main_src`.
-fn assert_contract_member_features(
-    client: &mut LspClient,
-    main_uri: &str,
-    main_src: &str,
-    call_line: u32,
-    def_uri_marker: &str,
-    def_line: u32,
-) {
-    assert_member_features(
-        client,
-        main_uri,
-        main_src,
-        "ref",
-        call_line,
-        def_uri_marker,
-        def_line,
-    );
-}
-
 /// Assert the full member-feature set for `<base>.transfer(...)` in `main_src`.
+///
+/// The base can be any expression (`ref`, `w.token`, `make()`, `items[0]`,
+/// `factory.create()`, …); the completion position is located from the dot
+/// preceding `transfer` so the base text never needs to be reconstructed.
 fn assert_member_features(
     client: &mut LspClient,
     main_uri: &str,
     main_src: &str,
-    base: &str,
     call_line: u32,
     def_uri_marker: &str,
     def_line: u32,
 ) {
-    // Member completion after `<base>.`.
-    let dot = line_col(main_src, call_line, &format!("{base}."), base.len() + 1);
+    // Member completion right after the dot preceding `transfer`.
+    let dot = line_col(main_src, call_line, ".transfer", 1);
     let completion = client.request(
         "textDocument/completion",
         json!({
@@ -445,7 +428,7 @@ circuit useIt(ref: Token): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_contract_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
     client.shutdown();
 }
 
@@ -480,7 +463,7 @@ circuit useIt(ref: Token): Boolean {
 
     // Only the caller is open; `token.compact` is resolved from the scan cache.
     open(&mut client, &main_uri, main_src);
-    assert_contract_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
     client.shutdown();
 }
 
@@ -517,7 +500,7 @@ circuit useIt(ref: MyToken): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_contract_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
+    assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
     client.shutdown();
 }
 
@@ -556,7 +539,7 @@ circuit useIt(): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_member_features(&mut client, &main_uri, main_src, "t", 8, "token.compact", 2);
+    assert_member_features(&mut client, &main_uri, main_src, 8, "token.compact", 2);
     client.shutdown();
 }
 
@@ -592,7 +575,7 @@ circuit useIt(ref: T_Token): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_contract_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
     client.shutdown();
 }
 
@@ -656,7 +639,7 @@ circuit useIt(): Boolean {
     open(&mut client, &factory_uri, factory_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_member_features(&mut client, &main_uri, main_src, "t", 5, "token.compact", 2);
+    assert_member_features(&mut client, &main_uri, main_src, 5, "token.compact", 2);
     client.shutdown();
 }
 
@@ -842,15 +825,7 @@ circuit useIt(w: Wallet): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_member_features(
-        &mut client,
-        &main_uri,
-        main_src,
-        "w.token",
-        8,
-        "token.compact",
-        2,
-    );
+    assert_member_features(&mut client, &main_uri, main_src, 8, "token.compact", 2);
     client.shutdown();
 }
 
@@ -896,15 +871,7 @@ circuit useIt(w: W_Wallet): Boolean {
     open(&mut client, &wallet_uri, wallet_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_member_features(
-        &mut client,
-        &main_uri,
-        main_src,
-        "w.token",
-        4,
-        "token.compact",
-        2,
-    );
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
     client.shutdown();
 }
 
@@ -996,15 +963,7 @@ circuit useIt(): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_member_features(
-        &mut client,
-        &main_uri,
-        main_src,
-        "make()",
-        7,
-        "token.compact",
-        2,
-    );
+    assert_member_features(&mut client, &main_uri, main_src, 7, "token.compact", 2);
     client.shutdown();
 }
 
@@ -1039,15 +998,7 @@ circuit useIt(items: Vector<10, T_Token>): Boolean {
     open(&mut client, &token_uri, token_src);
     open(&mut client, &main_uri, main_src);
 
-    assert_member_features(
-        &mut client,
-        &main_uri,
-        main_src,
-        "items[0]",
-        4,
-        "token.compact",
-        2,
-    );
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
     client.shutdown();
 }
 
@@ -1102,5 +1053,90 @@ circuit useIt(): Boolean {
         "missing call-base use: {refs}"
     );
 
+    client.shutdown();
+}
+
+/// Method-call base via a contract circuit: `factory.create().transfer(...)`,
+/// where `factory.create()` returns the contract type. Cross-file.
+#[test]
+fn test_member_method_call_base() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let factory_src = r#"
+import "./token" prefix T_;
+
+export contract Factory {
+    circuit create(): T_Token;
+}
+"#;
+    let main_src = r#"
+import "./factory" prefix F_;
+
+circuit useIt(factory: F_Factory): Boolean {
+    return factory.create().transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let factory_file = dir.path().join("factory.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&factory_file, factory_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let factory_uri = format!("file://{}", factory_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &factory_uri, factory_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
+    client.shutdown();
+}
+
+/// Method-call base via a built-in container: `tokens.lookup(k).transfer(...)`,
+/// where `Map.lookup` returns the map's value type (generic substitution).
+#[test]
+fn test_member_builtin_method_call_base() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+ledger tokens: Map<Address, T_Token>;
+
+circuit useIt(): Boolean {
+    return tokens.lookup(0).transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
     client.shutdown();
 }

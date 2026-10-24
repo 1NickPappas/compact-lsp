@@ -1942,10 +1942,19 @@ impl ParserEngine {
                 let member = node
                     .child_by_field_name("member")
                     .map(|member| self.node_text(member, source));
+                // A `member_access_expr` with `arguments` is a method call
+                // (`factory.create()`, `map.lookup(k)`), not a field access.
+                let is_call = node.child_by_field_name("arguments").is_some();
                 match (base, member) {
-                    (Some(MemberBase::Path(mut path)), Some(member)) => {
-                        path.push(member);
-                        MemberBase::Path(path)
+                    (Some(base), Some(member)) => {
+                        if is_call {
+                            MemberBase::MethodCall(Box::new(base), member)
+                        } else if let MemberBase::Path(mut path) = base {
+                            path.push(member);
+                            MemberBase::Path(path)
+                        } else {
+                            MemberBase::Other
+                        }
                     }
                     _ => MemberBase::Other,
                 }
@@ -1977,6 +1986,9 @@ impl ParserEngine {
         match base {
             MemberBase::Path(path) => path.join("."),
             MemberBase::Call(callee) => format!("{}()", callee),
+            MemberBase::MethodCall(receiver, method) => {
+                format!("{}.{}()", Self::member_base_display(receiver), method)
+            }
             MemberBase::Index(inner) => format!("{}[]", Self::member_base_display(inner)),
             MemberBase::Other => String::new(),
         }
@@ -3375,6 +3387,50 @@ circuit useIndex(): Boolean {
             ctx.base,
             MemberBase::Index(Box::new(MemberBase::Path(vec!["items".to_string()])))
         );
+    }
+
+    #[test]
+    fn test_member_base_method_call() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Factory { circuit create(): Token; }
+contract Token { circuit transfer(to: Address): Boolean; }
+circuit useIt(factory: Factory, tokens: Map<Address, Token>): Boolean {
+    factory.create().transfer(0);
+    tokens.lookup(0).transfer(0);
+    return true;
+}
+"#;
+        let line = 4;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("contract method-call base");
+        assert_eq!(
+            ctx.base,
+            MemberBase::MethodCall(
+                Box::new(MemberBase::Path(vec!["factory".to_string()])),
+                "create".to_string()
+            )
+        );
+        assert_eq!(ctx.base_name, "factory.create()");
+        assert_eq!(ctx.member_name, "transfer");
+
+        let line = 5;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("builtin method-call base");
+        assert_eq!(
+            ctx.base,
+            MemberBase::MethodCall(
+                Box::new(MemberBase::Path(vec!["tokens".to_string()])),
+                "lookup".to_string()
+            )
+        );
+        assert_eq!(ctx.base_name, "tokens.lookup()");
     }
 
     #[test]

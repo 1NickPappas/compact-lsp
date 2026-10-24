@@ -48,6 +48,10 @@ struct TypeDef {
     description: String,
     #[serde(default)]
     doc_url: String,
+    /// Generic parameter names, e.g. `<K, V>` for `Map`. Empty when the type
+    /// is not generic.
+    #[serde(default)]
+    type_params: String,
     methods: Vec<MethodDef>,
 }
 
@@ -73,6 +77,7 @@ struct ParsedType {
     name: String,
     description: &'static str,
     doc_url: &'static str,
+    type_params: &'static str,
     methods: Vec<BuiltinMethod>,
 }
 
@@ -93,6 +98,7 @@ fn registry() -> &'static ParsedRegistry {
                 name: t.name,
                 description: Box::leak(t.description.into_boxed_str()),
                 doc_url: Box::leak(t.doc_url.into_boxed_str()),
+                type_params: Box::leak(t.type_params.into_boxed_str()),
                 methods: t
                     .methods
                     .into_iter()
@@ -131,6 +137,77 @@ pub fn methods_for_type_for(
         .iter()
         .filter(|m| is_available_range(m.min_language_version, m.max_language_version, language))
         .collect()
+}
+
+/// The generic parameter names declared for a built-in type (`Map` → `["K", "V"]`).
+fn type_param_names(type_name: &str) -> Vec<&'static str> {
+    let raw = registry()
+        .types
+        .iter()
+        .find(|t| t.name == type_name)
+        .map(|t| t.type_params)
+        .unwrap_or("");
+    raw.trim_start_matches('<')
+        .trim_end_matches('>')
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// The declared return type of a method signature (`lookup(key: K): V` → `V`).
+fn return_type_of(signature: &str) -> Option<String> {
+    let (_, ret) = signature.rsplit_once("): ")?;
+    let ret = ret.trim();
+    if ret.is_empty() {
+        None
+    } else {
+        Some(ret.to_string())
+    }
+}
+
+/// Substitute generic parameter identifiers with concrete type arguments
+/// (`Maybe<T>` + `T` → `Token` becomes `Maybe<Token>`).
+fn substitute_generics(text: &str, params: &[&str], args: &[String]) -> String {
+    let replace = |word: &str| -> String {
+        match params.iter().position(|p| *p == word) {
+            Some(i) => args.get(i).cloned().unwrap_or_else(|| word.to_string()),
+            None => word.to_string(),
+        }
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut ident = String::new();
+    for c in text.chars() {
+        if c.is_alphanumeric() || c == '_' {
+            ident.push(c);
+        } else {
+            if !ident.is_empty() {
+                out.push_str(&replace(&ident));
+                ident.clear();
+            }
+            out.push(c);
+        }
+    }
+    if !ident.is_empty() {
+        out.push_str(&replace(&ident));
+    }
+    out
+}
+
+/// The declared return type of a built-in method on a (possibly generic) type,
+/// with the receiver's generic arguments substituted in.
+///
+/// `method_return_type("Map", &["Address".into(), "Token".into()], "lookup")`
+/// returns `Some("Token")`.
+pub fn method_return_type(
+    type_name: &str,
+    type_args: &[String],
+    method_name: &str,
+) -> Option<String> {
+    let method = find_method_by_name(type_name, method_name)?;
+    let ret = return_type_of(method.signature)?;
+    let params = type_param_names(type_name);
+    Some(substitute_generics(&ret, &params, type_args))
 }
 
 /// Find a specific built-in method by type and method name.
@@ -635,5 +712,38 @@ mod tests {
         assert!(!has_builtin_methods("Boolean"));
         assert!(!has_builtin_methods("Field"));
         assert!(!has_builtin_methods("NonExistent"));
+    }
+
+    #[test]
+    fn test_type_param_names() {
+        assert_eq!(type_param_names("Map"), vec!["K", "V"]);
+        assert_eq!(type_param_names("List"), vec!["T"]);
+        assert_eq!(type_param_names("MerkleTree"), vec!["n", "T"]);
+        assert!(type_param_names("Counter").is_empty());
+    }
+
+    #[test]
+    fn test_method_return_type_generic_substitution() {
+        let map_args = vec!["Address".to_string(), "Token".to_string()];
+        assert_eq!(
+            method_return_type("Map", &map_args, "lookup").as_deref(),
+            Some("Token")
+        );
+        // A method with no declared return type.
+        assert_eq!(method_return_type("Map", &map_args, "insert"), None);
+        // A non-generic return type is passed through unchanged.
+        assert_eq!(
+            method_return_type("Map", &map_args, "member").as_deref(),
+            Some("Boolean")
+        );
+        // A generic return type substitutes the receiver's argument.
+        let list_args = vec!["Token".to_string()];
+        assert_eq!(
+            method_return_type("List", &list_args, "head").as_deref(),
+            Some("Maybe<Token>")
+        );
+        // Unknown method / type.
+        assert_eq!(method_return_type("Map", &map_args, "nope"), None);
+        assert_eq!(method_return_type("Nope", &[], "lookup"), None);
     }
 }

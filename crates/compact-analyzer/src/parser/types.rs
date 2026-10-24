@@ -145,6 +145,8 @@ pub enum MemberBase {
     Path(Vec<String>),
     /// A call to a circuit/function (`make()`, `F_make()`).
     Call(String),
+    /// A method call on a receiver (`factory.create()`, `map.lookup(k)`).
+    MethodCall(Box<MemberBase>, String),
     /// An index access (`arr[i]` → container `arr`).
     Index(Box<MemberBase>),
     /// A base we don't model.

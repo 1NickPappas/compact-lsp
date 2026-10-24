@@ -50,6 +50,7 @@ doc = "Reset the counter to zero."
 [[types]]
 name = "Cell"
 description = "Mutable single-value container for ledger state."
+type_params = "<T>"
 doc_url = "https://docs.midnight.network/develop/reference/compact/ledger-adt"
 
 [[types.methods]]
@@ -81,6 +82,7 @@ doc = "Reset to the type's default value."
 [[types]]
 name = "Map"
 description = "Key-value mapping for ledger state."
+type_params = "<K, V>"
 doc_url = "https://docs.midnight.network/develop/reference/compact/ledger-adt"
 
 [[types.methods]]
@@ -142,6 +144,7 @@ doc = "Clear the map to empty."
 [[types]]
 name = "Set"
 description = "Unordered collection of unique elements for ledger state."
+type_params = "<T>"
 doc_url = "https://docs.midnight.network/develop/reference/compact/ledger-adt"
 
 [[types.methods]]
@@ -191,6 +194,7 @@ doc = "Clear the set to empty."
 [[types]]
 name = "List"
 description = "Ordered list of elements for ledger state."
+type_params = "<T>"
 doc_url = "https://docs.midnight.network/develop/reference/compact/ledger-adt"
 
 [[types.methods]]
@@ -240,6 +244,7 @@ doc = "Clear the list to empty."
 [[types]]
 name = "MerkleTree"
 description = "Append-only Merkle tree for ledger state with membership proofs."
+type_params = "<n, T>"
 doc_url = "https://docs.midnight.network/develop/reference/compact/ledger-adt"
 
 [[types.methods]]
@@ -295,6 +300,7 @@ doc = "Clear the tree to empty."
 [[types]]
 name = "HistoricMerkleTree"
 description = "Merkle tree with historical root tracking for ledger state."
+type_params = "<n, T>"
 doc_url = "https://docs.midnight.network/develop/reference/compact/ledger-adt"
 
 [[types.methods]]

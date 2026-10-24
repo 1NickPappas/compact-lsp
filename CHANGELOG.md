@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Method-call bases** for contract references: `factory.create().transfer(...)` resolves the
+  receiver's contract type and reads the called circuit's declared return type, and
+  `tokens.lookup(k).transfer(...)` resolves a built-in method's return type from the registry with
+  the receiver's generic arguments substituted (`Map<K, V>` → `V`). All member features and
+  find-references/rename are covered.
+
 ## [0.4.0] - 2026-10-24
 
 ### Added
