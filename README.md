@@ -81,7 +81,9 @@ requires language 0.26+.
 | Area | Status |
 |------|--------|
 | Code Actions | Not implemented |
-| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`) and index bases (`items[i].circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Does not resolve method-call bases (`obj.get().circuit(...)`) or generics |
+| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`) and index bases (`items[i].circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Does not resolve **method-call bases** (`obj.get().circuit(...)`) or **generic type parameters** (`circuit f<T>(x: T)`) |
+| Struct field / enum variant references | Find References / Rename cover value symbols and contract-type circuits; `.field` and enum-variant usages are not collected yet |
+| Selective imports | `import { A, B } from "./mod"` has no explicit binding; imported names resolve via the workspace scan by name (ambiguous when several files export the same name) |
 | Range formatting | `format-compact` is whole-document only |
 
 ## Requirements
