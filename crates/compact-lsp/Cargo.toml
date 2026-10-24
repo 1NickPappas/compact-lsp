@@ -44,4 +44,4 @@ tempfile.workspace = true
 toml.workspace = true
 
 # Our diagnostic engine crate (version is required for `cargo publish`)
-compact-analyzer = { path = "../compact-analyzer", version = "0.2.2" }
+compact-analyzer = { path = "../compact-analyzer", version = "0.2.3" }
