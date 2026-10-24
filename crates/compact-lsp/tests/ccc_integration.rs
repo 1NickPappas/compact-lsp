@@ -805,3 +805,158 @@ circuit useIt(a: T_Token, b: T_Token): Boolean {
 
     client.shutdown();
 }
+
+/// Member-chain base in the same file: `w.token.transfer(...)` where `Wallet`
+/// is a local struct whose field is the contract type.
+#[test]
+fn test_member_chain_struct_field() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+struct Wallet {
+    token: T_Token,
+}
+
+circuit useIt(w: Wallet): Boolean {
+    return w.token.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(
+        &mut client,
+        &main_uri,
+        main_src,
+        "w.token",
+        8,
+        "token.compact",
+        2,
+    );
+    client.shutdown();
+}
+
+/// Member-chain base whose struct is defined in another file.
+#[test]
+fn test_member_chain_imported_struct() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let wallet_src = r#"
+import "./token" prefix T_;
+
+export struct Wallet {
+    token: T_Token,
+}
+"#;
+    let main_src = r#"
+import "./wallet" prefix W_;
+
+circuit useIt(w: W_Wallet): Boolean {
+    return w.token.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let wallet_file = dir.path().join("wallet.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&wallet_file, wallet_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let wallet_uri = format!("file://{}", wallet_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &wallet_uri, wallet_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(
+        &mut client,
+        &main_uri,
+        main_src,
+        "w.token",
+        4,
+        "token.compact",
+        2,
+    );
+    client.shutdown();
+}
+
+/// Find References must also find a contract-circuit use behind a struct field.
+#[test]
+fn test_member_chain_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+struct Wallet { token: T_Token, }
+
+circuit useIt(w: Wallet): Boolean {
+    w.token.transfer(0, 1);
+    return true;
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    let refs = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": token_uri },
+            "position": { "line": 2, "character": 15 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    let pairs = location_pairs(&refs);
+    assert_eq!(pairs.len(), 2, "expected def + 1 chained use: {refs}");
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("caller.compact") && *l == 6),
+        "missing chained use: {refs}"
+    );
+
+    client.shutdown();
+}

@@ -273,12 +273,13 @@ pub fn detect_dot_context(content: &str, line: u32, character: u32) -> Option<St
         return None;
     }
 
-    // Scan backwards from before the dot to find the base identifier
+    // Scan backwards from before the dot over a dotted identifier path
+    // (`w.token` → "w.token"), so member-chain bases resolve.
     let end = dot_idx;
     let mut start = end;
     while start > 0 {
         let c = chars.get(start - 1)?;
-        if c.is_alphanumeric() || *c == '_' {
+        if c.is_alphanumeric() || *c == '_' || *c == '.' {
             start -= 1;
         } else {
             break;
@@ -289,7 +290,9 @@ pub fn detect_dot_context(content: &str, line: u32, character: u32) -> Option<St
         return None;
     }
 
-    Some(chars[start..end].iter().collect())
+    let path: String = chars[start..end].iter().collect();
+    let path = path.trim_start_matches('.').to_string();
+    if path.is_empty() { None } else { Some(path) }
 }
 
 /// Get the variable name before a dot at the cursor position.
@@ -316,12 +319,13 @@ pub fn get_dot_access_variable(content: &str, line: u32, character: u32) -> Opti
         return None;
     }
 
-    // Scan backwards from before the dot to find the identifier
+    // Scan backwards from before the dot over a dotted identifier path
+    // (`w.token.` → "w.token"), so member-chain bases resolve.
     let end = dot_idx;
     let mut start = end;
     while start > 0 {
         let c = chars.get(start - 1)?;
-        if c.is_alphanumeric() || *c == '_' {
+        if c.is_alphanumeric() || *c == '_' || *c == '.' {
             start -= 1;
         } else {
             break;
@@ -332,7 +336,9 @@ pub fn get_dot_access_variable(content: &str, line: u32, character: u32) -> Opti
         return None;
     }
 
-    Some(chars[start..end].iter().collect())
+    let path: String = chars[start..end].iter().collect();
+    let path = path.trim_start_matches('.').to_string();
+    if path.is_empty() { None } else { Some(path) }
 }
 
 #[cfg(test)]

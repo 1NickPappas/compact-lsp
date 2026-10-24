@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Find References and Rename for contract-type circuits**: triggered on a circuit declaration or
   a `ref.circuit(...)` use and gated by the base's resolved contract type, so unrelated `.circuit`
   members are never touched. Works across files, tolerates canonical/non-canonical file URIs.
+- **Member-chain bases**: a contract reference reached through struct fields
+  (`w.token.transfer(...)`, nested `a.wallet.token.transfer(...)`, and structs imported from
+  another file) now resolves for completion, hover, definition, signature help,
+  find-references, and rename.
 
 ## [0.3.0] - 2026-10-24
 

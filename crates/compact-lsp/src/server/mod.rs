@@ -699,6 +699,87 @@ impl CompactLanguageServer {
         self.resolve_contract_type(&callee_uri, &aliased)
     }
 
+    /// Resolve the declared type name of a `base.member...` chain and the file
+    /// scope in which that name is written, following struct fields and aliases.
+    fn resolve_base_type_name(
+        &self,
+        uri: &str,
+        content: &str,
+        chain: &[String],
+    ) -> Option<(String, String)> {
+        let root = chain.first()?;
+        let mut name = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_variable_type(content, root)?
+        };
+        let mut scope_uri = uri.to_string();
+        let mut scope_content = content.to_string();
+
+        for member in &chain[1..] {
+            let (struct_uri, struct_content, struct_name) =
+                self.find_struct_home(&scope_uri, &scope_content, &name)?;
+            let field_type = {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.get_struct_field_type(&struct_content, &struct_name, member)?
+            };
+            name = {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.resolve_alias(&struct_content, &field_type)
+            };
+            scope_uri = struct_uri;
+            scope_content = struct_content;
+        }
+
+        let name = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.resolve_alias(&scope_content, &name)
+        };
+        Some((name, scope_uri))
+    }
+
+    /// Locate the file that declares a struct `name` (following aliases),
+    /// returning `(file_uri, file_content, struct_name)`.
+    fn find_struct_home(
+        &self,
+        uri: &str,
+        content: &str,
+        name: &str,
+    ) -> Option<(String, String, String)> {
+        let aliased = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.resolve_alias(content, name)
+        };
+        let local = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.struct_exists(content, &aliased)
+        };
+        if local {
+            return Some((uri.to_string(), content.to_string(), aliased));
+        }
+        let (file_uri, symbol) = self.find_symbol_anywhere(uri, &aliased)?;
+        let file_content = self.source_for(&file_uri)?;
+        let local = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.resolve_alias(&file_content, &symbol.name)
+        };
+        Some((file_uri, file_content, local))
+    }
+
+    /// Resolve the contract type of an expression base `base_chain`, which may
+    /// be a struct field path such as `w.token`.
+    fn resolve_base_contract_type(
+        &self,
+        uri: &str,
+        content: &str,
+        base_chain: &[String],
+    ) -> Option<(String, ContractTypeInfo)> {
+        if base_chain.len() == 1 {
+            return self.resolve_variable_contract_type(uri, content, &base_chain[0]);
+        }
+        let (name, scope_uri) = self.resolve_base_type_name(uri, content, base_chain)?;
+        self.resolve_contract_type(&scope_uri, &name)
+    }
+
     /// If `position` targets a contract-type circuit (its declaration or a
     /// `base.circuit(...)` use), return the defining file, contract, and name.
     fn contract_circuit_target(
@@ -725,7 +806,7 @@ impl CompactLanguageServer {
             parser.get_member_access_context(content, line, character)
         }?;
         let (file_uri, contract) =
-            self.resolve_variable_contract_type(uri, content, &member.base_name)?;
+            self.resolve_base_contract_type(uri, content, &member.base_chain)?;
         if contract
             .circuits
             .iter()
@@ -778,7 +859,7 @@ impl CompactLanguageServer {
             };
             for use_ctx in uses {
                 let Some((resolved_uri, resolved_contract)) =
-                    self.resolve_variable_contract_type(file_uri, file_content, &use_ctx.base_name)
+                    self.resolve_base_contract_type(file_uri, file_content, &use_ctx.base_chain)
                 else {
                     continue;
                 };
@@ -1181,11 +1262,12 @@ impl LanguageServer for CompactLanguageServer {
 
             if let Some(var_name) = var_name {
                 tracing::debug!("Dot completion: base variable = {}", var_name);
+                let chain: Vec<String> = var_name.split('.').map(str::to_string).collect();
 
                 // Contract type? Offer its declared circuits (cross-contract calls).
-                // Covers annotations, aliases, and same-/cross-file `const x = f();`.
+                // Covers annotations, aliases, inference, and struct-field chains.
                 if let Some((_file, contract)) =
-                    self.resolve_variable_contract_type(&uri, &content, &var_name)
+                    self.resolve_base_contract_type(&uri, &content, &chain)
                     && !contract.circuits.is_empty()
                 {
                     let items: Vec<CompletionItem> = contract
@@ -1209,18 +1291,17 @@ impl LanguageServer for CompactLanguageServer {
                     return Ok(Some(CompletionResponse::Array(items)));
                 }
 
-                let var_type = {
-                    let mut parser = self.parser_engine.lock().unwrap();
-                    parser.get_variable_type(&content, &var_name)
-                };
-                // Fallback: `kernel` is implicitly available without a ledger declaration
-                let var_type = var_type.or_else(|| {
-                    if var_name == "kernel" {
-                        Some("Kernel".to_string())
-                    } else {
-                        None
-                    }
-                });
+                let var_type = self
+                    .resolve_base_type_name(&uri, &content, &chain)
+                    .map(|(name, _scope)| name)
+                    .or_else(|| {
+                        // `kernel` is implicitly available without a ledger declaration.
+                        if var_name == "kernel" {
+                            Some("Kernel".to_string())
+                        } else {
+                            None
+                        }
+                    });
                 if let Some(type_str) = var_type {
                     let base_type = builtins::extract_base_type(&type_str);
                     tracing::debug!("Dot completion: resolved type = {}", base_type);
@@ -1859,9 +1940,9 @@ impl LanguageServer for CompactLanguageServer {
             parser.get_member_access_context(&content, position.line, position.character)
         };
         if let Some(ctx) = member_ctx {
-            // Contract-type circuit? (annotation / alias / inference, same or cross file.)
+            // Contract-type circuit? (annotation / alias / inference / struct-field chain.)
             if let Some((_file, contract)) =
-                self.resolve_variable_contract_type(&uri, &content, &ctx.base_name)
+                self.resolve_base_contract_type(&uri, &content, &ctx.base_chain)
                 && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
             {
                 let signature = circuit
@@ -2006,7 +2087,7 @@ impl LanguageServer for CompactLanguageServer {
         if let Some(ctx) = member_ctx {
             // Contract-type circuit? (annotation / alias / inference, same or cross file.)
             if let Some((file_uri, contract)) =
-                self.resolve_variable_contract_type(&uri_string, &content, &ctx.base_name)
+                self.resolve_base_contract_type(&uri_string, &content, &ctx.base_chain)
                 && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
             {
                 let target_uri = match Uri::from_str(&file_uri) {
@@ -2189,7 +2270,7 @@ impl LanguageServer for CompactLanguageServer {
         };
         if let Some(ctx) = member_call
             && let Some((_file, contract)) =
-                self.resolve_variable_contract_type(&uri, &content, &ctx.base_name)
+                self.resolve_base_contract_type(&uri, &content, &ctx.base_chain)
             && let Some(circuit) = contract.circuits.iter().find(|c| c.name == ctx.member_name)
         {
             let active_param =

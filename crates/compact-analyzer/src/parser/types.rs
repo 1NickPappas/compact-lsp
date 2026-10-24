@@ -141,8 +141,10 @@ pub enum SemanticTokenModifier {
 /// Context from a member access expression (e.g., `round.increment`).
 #[derive(Debug, Clone)]
 pub struct MemberAccessContext {
-    /// The base identifier name (e.g., "round").
+    /// The base path as written (e.g., "round", "w.token").
     pub base_name: String,
+    /// The base path split into identifiers (e.g., ["w", "token"]).
+    pub base_chain: Vec<String>,
     /// The member identifier name (e.g., "increment").
     pub member_name: String,
     /// The range of the member identifier.

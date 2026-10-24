@@ -34,7 +34,7 @@ Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35
 | **Folding Ranges** | Code folding for blocks and functions |
 | **Cross-file Errors** | Errors propagate to dependent files on save |
 | **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
-| **Cross-contract calls** | Completion, hover, go-to-definition, signature help, find-references, and rename for `ref.circuit(...)`; `contract implements` type completion |
+| **Cross-contract calls** | Completion, hover, go-to-definition, signature help, find-references, and rename for `ref.circuit(...)` — reached through struct fields (`w.token.circuit(...)`) too; `contract implements` type completion |
 
 ### Cross-Project Support
 
@@ -69,15 +69,17 @@ a local alias (`type MyToken = Token;`), or inferred from the initializer of a `
 another file, whose scope decides what the return-type name means). The contract type itself may
 live in another file: import it (`import "./Token";` or `import "./Token" prefix T_;`) and the
 features work **across files** — including when the defining file is not open, resolved from the
-workspace scan. Find-references and rename follow a circuit across every file where a
-contract-typed reference uses it. `contract implements` requires language 0.26+.
+workspace scan. Member-chain bases resolve through struct fields (`w.token.transfer(...)`),
+including nested (`a.wallet.token.transfer(...)`) and imported structs. Find-references and
+rename follow a circuit across every file where a contract-typed reference uses it.
+`contract implements` requires language 0.26+.
 
 ### Known Limitations
 
 | Area | Status |
 |------|--------|
 | Code Actions | Not implemented |
-| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Does not infer through member calls or generics |
+| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`, including nested/imported structs), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Does not resolve expression bases (`make().circuit(...)`, `(a ? b : c).circuit(...)`, `arr[i].circuit(...)`) or generics |
 | Range formatting | `format-compact` is whole-document only |
 
 ## Requirements

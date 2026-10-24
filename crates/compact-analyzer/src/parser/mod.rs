@@ -1880,14 +1880,19 @@ impl ParserEngine {
             return None;
         }
 
-        // Extract the base identifier
+        // Extract the base path (`w.token` → ["w", "token"]).
         let base_node = parent.child_by_field_name("base")?;
-        let base_name = self.extract_base_identifier(base_node, source_bytes)?;
+        let base_chain = self.base_chain(base_node, source_bytes);
+        if base_chain.is_empty() {
+            return None;
+        }
+        let base_name = base_chain.join(".");
         let member_name = self.node_text(node, source_bytes);
         let member_range = self.node_range(node);
 
         Some(MemberAccessContext {
             base_name,
+            base_chain,
             member_name,
             member_range,
         })
@@ -1897,20 +1902,6 @@ impl ParserEngine {
     ///
     /// For simple identifiers this returns the text directly.
     /// For more complex expressions, tries to find an `id` child.
-    fn extract_base_identifier(&self, node: Node, source: &[u8]) -> Option<String> {
-        if node.kind() == "id" {
-            return Some(self.node_text(node, source));
-        }
-        // For expression nodes, try to find an id child
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "id" {
-                return Some(self.node_text(child, source));
-            }
-        }
-        None
-    }
-
     /// Recursively collect member accesses named `member_name`.
     fn collect_member_accesses_rec(
         &self,
@@ -1923,18 +1914,101 @@ impl ParserEngine {
             && let Some(member) = node.child_by_field_name("member")
             && self.node_text(member, source) == member_name
             && let Some(base) = node.child_by_field_name("base")
-            && let Some(base_name) = self.extract_base_identifier(base, source)
         {
-            out.push(MemberAccessContext {
-                base_name,
-                member_name: member_name.to_string(),
-                member_range: self.node_range(member),
-            });
+            let base_chain = self.base_chain(base, source);
+            if !base_chain.is_empty() {
+                out.push(MemberAccessContext {
+                    base_name: base_chain.join("."),
+                    base_chain,
+                    member_name: member_name.to_string(),
+                    member_range: self.node_range(member),
+                });
+            }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.collect_member_accesses_rec(child, source, member_name, out);
         }
+    }
+
+    /// The base path of a member access, root first (`w.token` → ["w", "token"]).
+    fn base_chain(&self, node: Node, source: &[u8]) -> Vec<String> {
+        if node.kind() == "member_access_expr" {
+            let mut chain = node
+                .child_by_field_name("base")
+                .map(|base| self.base_chain(base, source))
+                .unwrap_or_default();
+            if let Some(member) = node.child_by_field_name("member") {
+                chain.push(self.node_text(member, source));
+            }
+            return chain;
+        }
+        if node.kind() == "id" {
+            return vec![self.node_text(node, source)];
+        }
+        // `term` and other wrappers: take the first nested identifier.
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "id" {
+                return vec![self.node_text(child, source)];
+            }
+            let mut inner = child.walk();
+            if let Some(id) = child.children(&mut inner).find(|c| c.kind() == "id") {
+                return vec![self.node_text(id, source)];
+            }
+        }
+        Vec::new()
+    }
+
+    /// Whether a `struct` named `name` is declared in this file.
+    pub fn struct_exists(&mut self, source: &str, name: &str) -> bool {
+        let Some(tree) = self.parse(source) else {
+            return false;
+        };
+        let root = tree.root_node();
+        let resolved = self.resolve_type_name(root, source.as_bytes(), name);
+        self.find_struct(root, source.as_bytes(), &resolved)
+            .is_some()
+    }
+
+    /// Declared type of a `struct` field (`struct S { field: T }`), following
+    /// same-file aliases for the struct name.
+    pub fn get_struct_field_type(
+        &mut self,
+        source: &str,
+        struct_name: &str,
+        field_name: &str,
+    ) -> Option<String> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+        let resolved = self.resolve_type_name(root, source_bytes, struct_name);
+        let struct_node = self.find_struct(root, source_bytes, &resolved)?;
+        let mut cursor = struct_node.walk();
+        for child in struct_node.children(&mut cursor) {
+            if child.kind() == "arg"
+                && self.get_field_text(child, "id", source_bytes).as_deref() == Some(field_name)
+            {
+                return self.get_field_text(child, "type", source_bytes);
+            }
+        }
+        None
+    }
+
+    /// Recursively find a `struct` named `name`.
+    fn find_struct<'a>(&self, node: Node<'a>, source: &[u8], name: &str) -> Option<Node<'a>> {
+        if node.kind() == "struct"
+            && self.get_field_text(node, "name", source).as_deref() == Some(name)
+        {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_struct(child, source, name) {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Look up the type of a variable by name.
@@ -2287,10 +2361,15 @@ impl ParserEngine {
             {
                 let member_node = node.child_by_field_name("member")?;
                 let base_node = node.child_by_field_name("base")?;
-                let base_name = self.extract_base_identifier(base_node, source.as_bytes())?;
+                let base_chain = self.base_chain(base_node, source.as_bytes());
+                if base_chain.is_empty() {
+                    return None;
+                }
+                let base_name = base_chain.join(".");
                 let member_name = self.node_text(member_node, source.as_bytes());
                 return Some(MemberAccessContext {
                     base_name,
+                    base_chain,
                     member_name,
                     member_range: self.node_range(member_node),
                 });
@@ -3149,8 +3228,78 @@ circuit useIt(a: Token, b: Token): Boolean {
         let uses = parser.collect_member_accesses(source, "transfer");
         assert_eq!(uses.len(), 2);
         assert_eq!(uses[0].base_name, "a");
+        assert_eq!(uses[0].base_chain, vec!["a"]);
         assert_eq!(uses[1].base_name, "b");
         assert!(parser.collect_member_accesses(source, "missing").is_empty());
+
+        // A member-chain base is captured in full.
+        let chained = r#"
+struct Wallet { token: Token, }
+circuit g(w: Wallet): Boolean {
+    w.token.transfer(0);
+}
+"#;
+        let uses = parser.collect_member_accesses(chained, "transfer");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].base_name, "w.token");
+        assert_eq!(uses[0].base_chain, vec!["w", "token"]);
+    }
+
+    #[test]
+    fn test_get_struct_field_type() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+struct Wallet {
+    token: Token,
+    owner: Address,
+}
+
+type MyWallet = Wallet;
+
+circuit f(w: Wallet): Boolean {
+    return w.token.transfer(0);
+}
+"#;
+        assert_eq!(
+            parser
+                .get_struct_field_type(source, "Wallet", "token")
+                .as_deref(),
+            Some("Token")
+        );
+        assert_eq!(
+            parser
+                .get_struct_field_type(source, "MyWallet", "owner")
+                .as_deref(),
+            Some("Address")
+        );
+        assert!(
+            parser
+                .get_struct_field_type(source, "Wallet", "missing")
+                .is_none()
+        );
+        assert!(parser.struct_exists(source, "Wallet"));
+        assert!(!parser.struct_exists(source, "Nope"));
+    }
+
+    #[test]
+    fn test_member_access_base_chain() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+struct Wallet { token: Token, }
+struct Account { wallet: Wallet, }
+circuit f(a: Account): Boolean {
+    a.wallet.token.transfer(0, 1);
+}
+"#;
+        let line = 4;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("member access context");
+        assert_eq!(ctx.base_name, "a.wallet.token");
+        assert_eq!(ctx.base_chain, vec!["a", "wallet", "token"]);
+        assert_eq!(ctx.member_name, "transfer");
     }
 
     #[test]
