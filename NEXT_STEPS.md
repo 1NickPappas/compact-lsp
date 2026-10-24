@@ -64,6 +64,7 @@ Remaining:
 - ✅ **Consolidate duplicate `is_builtin_type`** (`216d700`) — single source in `compact-analyzer` (`pub fn`, re-exported from `lib.rs`); `compact-lsp/src/server/validation.rs` re-exports it.
 - ✅ **`keccak256` gating** — resolved by version-aware `min_language_version` gating: hidden on the mainnet language 0.23.0 compiler (toolchain 0.31.1), offered on 0.23.103+. The LSP is no longer "ahead of the installed compiler".
 - ✅ **Probe-compile drift check** — the `compiler-probe` CI job installs toolchain 0.31.1 and runs the `diagnostics.rs` probe tests (stable-symbol coverage + keccak256 gate consistency). They self-skip when no compiler is present.
+- **[Add] Outdated-dependency watcher** — a scheduled workflow (like `upstream-watch`) that files an issue when a direct Cargo dependency is behind the latest stable release (source: `cargo outdated` or the crates.io API).
 
 ---
 

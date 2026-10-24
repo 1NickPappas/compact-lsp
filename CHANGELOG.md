@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- README: crates.io/downloads badges and an **Install** section documenting
+  `cargo install compact-lsp`, prebuilt binaries, and the two published crates.
+
 ### Changed
 - Updated all direct dependencies to their latest stable versions: `tree-sitter` 0.25 → 0.27,
   `toml` 0.8 → 1, `ls-types` 0.0.2 → 0.0.6, plus the latest `tokio`, `serde`, `serde_json`,
