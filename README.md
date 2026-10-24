@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/1NickPappas/compact-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/1NickPappas/compact-lsp/actions/workflows/ci.yml)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org)
 [![crates.io](https://img.shields.io/crates/v/compact-lsp.svg)](https://crates.io/crates/compact-lsp)
 [![Downloads](https://img.shields.io/crates/d/compact-lsp.svg)](https://crates.io/crates/compact-lsp)
 [![docs.rs](https://docs.rs/compact-analyzer/badge.svg)](https://docs.rs/compact-analyzer)

@@ -156,21 +156,21 @@ impl ParserEngine {
             "struct" => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "arg" {
-                        if let Some(name) = self.get_field_text(child, "id", source) {
-                            let range = self.node_range(child);
-                            #[allow(deprecated)]
-                            children.push(DocumentSymbol {
-                                name,
-                                detail: None,
-                                kind: SymbolKind::FIELD,
-                                tags: None,
-                                deprecated: None,
-                                range,
-                                selection_range: range,
-                                children: None,
-                            });
-                        }
+                    if child.kind() == "arg"
+                        && let Some(name) = self.get_field_text(child, "id", source)
+                    {
+                        let range = self.node_range(child);
+                        #[allow(deprecated)]
+                        children.push(DocumentSymbol {
+                            name,
+                            detail: None,
+                            kind: SymbolKind::FIELD,
+                            tags: None,
+                            deprecated: None,
+                            range,
+                            selection_range: range,
+                            children: None,
+                        });
                     }
                 }
             }
@@ -206,21 +206,21 @@ impl ParserEngine {
             "ecdecl" => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "ecdecl_circuit" {
-                        if let Some(name) = self.get_field_text(child, "id", source) {
-                            let range = self.node_range(child);
-                            #[allow(deprecated)]
-                            children.push(DocumentSymbol {
-                                name,
-                                detail: Some("circuit".to_string()),
-                                kind: SymbolKind::METHOD,
-                                tags: None,
-                                deprecated: None,
-                                range,
-                                selection_range: range,
-                                children: None,
-                            });
-                        }
+                    if child.kind() == "ecdecl_circuit"
+                        && let Some(name) = self.get_field_text(child, "id", source)
+                    {
+                        let range = self.node_range(child);
+                        #[allow(deprecated)]
+                        children.push(DocumentSymbol {
+                            name,
+                            detail: Some("circuit".to_string()),
+                            kind: SymbolKind::METHOD,
+                            tags: None,
+                            deprecated: None,
+                            range,
+                            selection_range: range,
+                            children: None,
+                        });
                     }
                 }
             }
@@ -436,17 +436,17 @@ impl ParserEngine {
         }
 
         // Check if hovering on a definition
-        if let Some(parent) = node.parent() {
-            if let Some(info) = self.definition_hover(parent, source) {
-                return Some(info);
-            }
+        if let Some(parent) = node.parent()
+            && let Some(info) = self.definition_hover(parent, source)
+        {
+            return Some(info);
         }
 
         // Check if hovering on an identifier - try to find its definition
-        if kind == "id" {
-            if let Some(info) = self.find_definition_hover(&text, root, source) {
-                return Some(info);
-            }
+        if kind == "id"
+            && let Some(info) = self.find_definition_hover(&text, root, source)
+        {
+            return Some(info);
         }
 
         None
@@ -455,28 +455,72 @@ impl ParserEngine {
     /// Get documentation for Compact keywords.
     fn keyword_docs(&self, text: &str) -> Option<String> {
         let doc = match text {
-            "pragma" => "**pragma**\n\nDeclares compiler version requirements.\n\n```compact\npragma compact >=0.1.0;\n```",
-            "import" => "**import**\n\nImports a module or specific symbols.\n\n```compact\nimport MyModule;\nimport { symbol1, symbol2 } from OtherModule;\n```",
-            "export" => "**export**\n\nExports a declaration for use by other modules.\n\n```compact\nexport circuit myCircuit(): Field { ... }\nexport struct MyStruct { ... }\n```",
-            "module" => "**module**\n\nDefines a module namespace.\n\n```compact\nmodule MyModule {\n  // declarations\n}\n```",
-            "circuit" => "**circuit**\n\nDefines a circuit function that executes in zero-knowledge.\n\n```compact\ncircuit add(a: Field, b: Field): Field {\n  return a + b;\n}\n```",
-            "witness" => "**witness**\n\nDeclares a witness function that provides private inputs.\n\n```compact\nwitness get_secret(): Field;\n```",
-            "ledger" => "**ledger**\n\nDeclares on-chain state storage.\n\n```compact\nledger balance: Map<Address, Uint<64>>;\n```",
-            "struct" => "**struct**\n\nDefines a composite data type.\n\n```compact\nstruct Point {\n  x: Field;\n  y: Field;\n}\n```",
-            "enum" => "**enum**\n\nDefines an enumeration type.\n\n```compact\nenum Color {\n  Red,\n  Green,\n  Blue,\n}\n```",
-            "contract" => "**contract**\n\nDeclares an external contract interface.\n\n```compact\ncontract Token {\n  circuit transfer(to: Address, amount: Uint<64>): Boolean;\n}\n```",
-            "constructor" => "**constructor**\n\nDefines the contract initialization function.\n\n```compact\nconstructor(initial_value: Field) {\n  ledger.value = initial_value;\n}\n```",
-            "return" => "**return**\n\nReturns a value from a circuit.\n\n```compact\nreturn result;\n```",
-            "if" => "**if**\n\nConditional statement.\n\n```compact\nif (condition) {\n  // then branch\n} else {\n  // else branch\n}\n```",
-            "else" => "**else**\n\nElse branch of a conditional.\n\n```compact\nif (condition) {\n  // then\n} else {\n  // else\n}\n```",
-            "for" => "**for**\n\nLoop over a range.\n\n```compact\nfor (const i of 0..10) {\n  // loop body\n}\n```",
-            "const" => "**const**\n\nDeclares a constant value.\n\n```compact\nconst x = 42;\nconst PI: Field = 3;\n```",
-            "assert" => "**assert**\n\nAsserts a condition with an error message.\n\n```compact\nassert balance >= amount \"Insufficient balance\";\n```",
-            "map" => "**map**\n\nMaps a function over elements.\n\n```compact\nconst doubled = map(values, |x| x * 2);\n```",
-            "fold" => "**fold**\n\nReduces elements to a single value.\n\n```compact\nconst sum = fold(values, 0, |acc, x| acc + x);\n```",
-            "disclose" => "**disclose**\n\nDiscloses a private value publicly.\n\n```compact\ndisclose(secret_value);\n```",
-            "pure" => "**pure**\n\nMarks a circuit as having no side effects.\n\n```compact\nexport pure circuit add(a: Field, b: Field): Field { ... }\n```",
-            "sealed" => "**sealed**\n\nMarks a ledger state as immutable after initialization.\n\n```compact\nsealed ledger config: Config;\n```",
+            "pragma" => {
+                "**pragma**\n\nDeclares compiler version requirements.\n\n```compact\npragma compact >=0.1.0;\n```"
+            }
+            "import" => {
+                "**import**\n\nImports a module or specific symbols.\n\n```compact\nimport MyModule;\nimport { symbol1, symbol2 } from OtherModule;\n```"
+            }
+            "export" => {
+                "**export**\n\nExports a declaration for use by other modules.\n\n```compact\nexport circuit myCircuit(): Field { ... }\nexport struct MyStruct { ... }\n```"
+            }
+            "module" => {
+                "**module**\n\nDefines a module namespace.\n\n```compact\nmodule MyModule {\n  // declarations\n}\n```"
+            }
+            "circuit" => {
+                "**circuit**\n\nDefines a circuit function that executes in zero-knowledge.\n\n```compact\ncircuit add(a: Field, b: Field): Field {\n  return a + b;\n}\n```"
+            }
+            "witness" => {
+                "**witness**\n\nDeclares a witness function that provides private inputs.\n\n```compact\nwitness get_secret(): Field;\n```"
+            }
+            "ledger" => {
+                "**ledger**\n\nDeclares on-chain state storage.\n\n```compact\nledger balance: Map<Address, Uint<64>>;\n```"
+            }
+            "struct" => {
+                "**struct**\n\nDefines a composite data type.\n\n```compact\nstruct Point {\n  x: Field;\n  y: Field;\n}\n```"
+            }
+            "enum" => {
+                "**enum**\n\nDefines an enumeration type.\n\n```compact\nenum Color {\n  Red,\n  Green,\n  Blue,\n}\n```"
+            }
+            "contract" => {
+                "**contract**\n\nDeclares an external contract interface.\n\n```compact\ncontract Token {\n  circuit transfer(to: Address, amount: Uint<64>): Boolean;\n}\n```"
+            }
+            "constructor" => {
+                "**constructor**\n\nDefines the contract initialization function.\n\n```compact\nconstructor(initial_value: Field) {\n  ledger.value = initial_value;\n}\n```"
+            }
+            "return" => {
+                "**return**\n\nReturns a value from a circuit.\n\n```compact\nreturn result;\n```"
+            }
+            "if" => {
+                "**if**\n\nConditional statement.\n\n```compact\nif (condition) {\n  // then branch\n} else {\n  // else branch\n}\n```"
+            }
+            "else" => {
+                "**else**\n\nElse branch of a conditional.\n\n```compact\nif (condition) {\n  // then\n} else {\n  // else\n}\n```"
+            }
+            "for" => {
+                "**for**\n\nLoop over a range.\n\n```compact\nfor (const i of 0..10) {\n  // loop body\n}\n```"
+            }
+            "const" => {
+                "**const**\n\nDeclares a constant value.\n\n```compact\nconst x = 42;\nconst PI: Field = 3;\n```"
+            }
+            "assert" => {
+                "**assert**\n\nAsserts a condition with an error message.\n\n```compact\nassert balance >= amount \"Insufficient balance\";\n```"
+            }
+            "map" => {
+                "**map**\n\nMaps a function over elements.\n\n```compact\nconst doubled = map(values, |x| x * 2);\n```"
+            }
+            "fold" => {
+                "**fold**\n\nReduces elements to a single value.\n\n```compact\nconst sum = fold(values, 0, |acc, x| acc + x);\n```"
+            }
+            "disclose" => {
+                "**disclose**\n\nDiscloses a private value publicly.\n\n```compact\ndisclose(secret_value);\n```"
+            }
+            "pure" => {
+                "**pure**\n\nMarks a circuit as having no side effects.\n\n```compact\nexport pure circuit add(a: Field, b: Field): Field { ... }\n```"
+            }
+            "sealed" => {
+                "**sealed**\n\nMarks a ledger state as immutable after initialization.\n\n```compact\nsealed ledger config: Config;\n```"
+            }
             "true" => "**true**\n\nBoolean true literal.",
             "false" => "**false**\n\nBoolean false literal.",
             _ => return None,
@@ -487,20 +531,48 @@ impl ParserEngine {
     /// Get documentation for built-in types.
     fn builtin_type_docs(&self, text: &str) -> Option<String> {
         let doc = match text {
-            "Boolean" => "**Boolean**\n\nBoolean type with values `true` and `false`.\n\n```compact\nconst flag: Boolean = true;\n```",
-            "Field" => "**Field**\n\nField element - the native arithmetic type for ZK circuits.\n\nSupports addition, subtraction, multiplication, and division.\n\n```compact\nconst x: Field = 42;\nconst y = x * 2 + 1;\n```",
-            "Uint" => "**Uint<N>**\n\nUnsigned integer with `N` bits.\n\n```compact\nconst amount: Uint<64> = 1000;\nconst small: Uint<8> = 255;\n```",
-            "Bytes" => "**Bytes<N>**\n\nFixed-size byte array with `N` bytes.\n\n```compact\nconst hash: Bytes<32> = ...;\nconst data: Bytes<64> = ...;\n```",
-            "Vector" => "**Vector<N, T>**\n\nFixed-size array of `N` elements of type `T`.\n\n```compact\nconst values: Vector<10, Field> = ...;\nconst flags: Vector<8, Boolean> = ...;\n```",
-            "Opaque" => "**Opaque<\"name\">**\n\nOpaque type wrapper for external data.\n\n```compact\nconst external: Opaque<\"commitment\"> = ...;\n```",
-            "Map" => "**Map<K, V>**\n\nKey-value mapping for ledger state.\n\n```compact\nledger balances: Map<Bytes<32>, Uint<64>>;\n```",
-            "Set" => "**Set<T>**\n\nSet collection for ledger state.\n\n```compact\nledger members: Set<Bytes<32>>;\n```",
-            "Counter" => "**Counter**\n\nAtomic counter for ledger state.\n\n```compact\nledger nonce: Counter;\n```",
-            "Cell" => "**Cell<T>**\n\nMutable cell for ledger state.\n\n```compact\nledger value: Cell<Field>;\n```",
-            "List" => "**List<T>**\n\nOrdered list for ledger state. Supports prepend/pop from the front.\n\n```compact\nledger items: List<Field>;\n```",
-            "MerkleTree" => "**MerkleTree<N, T>**\n\nMerkle tree for ledger state. Stores leaves and maintains a root hash.\n\n```compact\nledger tree: MerkleTree<32, Bytes<32>>;\n```",
-            "HistoricMerkleTree" => "**HistoricMerkleTree<N, T>**\n\nHistoric Merkle tree with root history. Validates roots against any past root.\n\n```compact\nledger tree: HistoricMerkleTree<32, Bytes<32>>;\n```",
-            "Kernel" => "**Kernel**\n\nBuilt-in kernel operations available in every contract as `kernel`.\n\nProvides access to contract identity, minting, block time checks, and transaction claims.",
+            "Boolean" => {
+                "**Boolean**\n\nBoolean type with values `true` and `false`.\n\n```compact\nconst flag: Boolean = true;\n```"
+            }
+            "Field" => {
+                "**Field**\n\nField element - the native arithmetic type for ZK circuits.\n\nSupports addition, subtraction, multiplication, and division.\n\n```compact\nconst x: Field = 42;\nconst y = x * 2 + 1;\n```"
+            }
+            "Uint" => {
+                "**Uint<N>**\n\nUnsigned integer with `N` bits.\n\n```compact\nconst amount: Uint<64> = 1000;\nconst small: Uint<8> = 255;\n```"
+            }
+            "Bytes" => {
+                "**Bytes<N>**\n\nFixed-size byte array with `N` bytes.\n\n```compact\nconst hash: Bytes<32> = ...;\nconst data: Bytes<64> = ...;\n```"
+            }
+            "Vector" => {
+                "**Vector<N, T>**\n\nFixed-size array of `N` elements of type `T`.\n\n```compact\nconst values: Vector<10, Field> = ...;\nconst flags: Vector<8, Boolean> = ...;\n```"
+            }
+            "Opaque" => {
+                "**Opaque<\"name\">**\n\nOpaque type wrapper for external data.\n\n```compact\nconst external: Opaque<\"commitment\"> = ...;\n```"
+            }
+            "Map" => {
+                "**Map<K, V>**\n\nKey-value mapping for ledger state.\n\n```compact\nledger balances: Map<Bytes<32>, Uint<64>>;\n```"
+            }
+            "Set" => {
+                "**Set<T>**\n\nSet collection for ledger state.\n\n```compact\nledger members: Set<Bytes<32>>;\n```"
+            }
+            "Counter" => {
+                "**Counter**\n\nAtomic counter for ledger state.\n\n```compact\nledger nonce: Counter;\n```"
+            }
+            "Cell" => {
+                "**Cell<T>**\n\nMutable cell for ledger state.\n\n```compact\nledger value: Cell<Field>;\n```"
+            }
+            "List" => {
+                "**List<T>**\n\nOrdered list for ledger state. Supports prepend/pop from the front.\n\n```compact\nledger items: List<Field>;\n```"
+            }
+            "MerkleTree" => {
+                "**MerkleTree<N, T>**\n\nMerkle tree for ledger state. Stores leaves and maintains a root hash.\n\n```compact\nledger tree: MerkleTree<32, Bytes<32>>;\n```"
+            }
+            "HistoricMerkleTree" => {
+                "**HistoricMerkleTree<N, T>**\n\nHistoric Merkle tree with root history. Validates roots against any past root.\n\n```compact\nledger tree: HistoricMerkleTree<32, Bytes<32>>;\n```"
+            }
+            "Kernel" => {
+                "**Kernel**\n\nBuilt-in kernel operations available in every contract as `kernel`.\n\nProvides access to contract identity, minting, block time checks, and transaction claims."
+            }
             _ => return None,
         };
         Some(doc.to_string())
@@ -738,14 +810,15 @@ impl ParserEngine {
                         });
                     }
                 }
-                "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl" => {
-                    if self.get_field_text(parent, "name", source_bytes).as_deref() == Some(&text) {
-                        // We're on the definition itself
-                        return Some(DefinitionLocation {
-                            range: self.node_range(parent),
-                            selection_range: self.node_range(node),
-                        });
-                    }
+                "ldecl" | "struct" | "enumdef" | "mdefn" | "ecdecl"
+                    if self.get_field_text(parent, "name", source_bytes).as_deref()
+                        == Some(&text) =>
+                {
+                    // We're on the definition itself
+                    return Some(DefinitionLocation {
+                        range: self.node_range(parent),
+                        selection_range: self.node_range(node),
+                    });
                 }
                 _ => {}
             }
@@ -826,20 +899,19 @@ impl ParserEngine {
             let kind = n.kind();
 
             // Check for function call patterns (Compact uses function_call_term)
-            if kind == "function_call_term" {
-                if let Some(name) = self.get_call_function_name(n, source) {
-                    return Some((n, name));
-                }
+            if kind == "function_call_term"
+                && let Some(name) = self.get_call_function_name(n, source)
+            {
+                return Some((n, name));
             }
 
             // For blocks, search children for ERROR nodes with function calls
             // This handles incomplete code while typing
-            if kind == "block" {
-                if let Some((error_node, name)) =
+            if kind == "block"
+                && let Some((error_node, name)) =
                     self.find_error_call_in_block(n, source, cursor_point)
-                {
-                    return Some((error_node, name));
-                }
+            {
+                return Some((error_node, name));
             }
 
             current = n.parent();
@@ -1326,7 +1398,7 @@ impl ParserEngine {
                         token_type: SemanticTokenType::Function,
                         modifiers: vec![SemanticTokenModifier::Declaration],
                     });
-                }
+                };
             }
 
             // Struct definitions
@@ -1468,10 +1540,10 @@ impl ParserEngine {
             "const_stmt" => {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if matches!(child.kind(), "cbinding" | "const_binding") {
-                        if let Some(pattern) = child.child_by_field_name("pattern") {
-                            self.collect_binding_id_tokens(pattern, tokens);
-                        }
+                    if matches!(child.kind(), "cbinding" | "const_binding")
+                        && let Some(pattern) = child.child_by_field_name("pattern")
+                    {
+                        self.collect_binding_id_tokens(pattern, tokens);
                     }
                 }
             }
@@ -1538,33 +1610,32 @@ impl ParserEngine {
                 if let Some(name_node) = node
                     .children(&mut node.walk())
                     .find(|n| n.kind() == "function_name")
+                    && self.node_text(name_node, source) == symbol_name
                 {
-                    if self.node_text(name_node, source) == symbol_name {
-                        refs.push(ReferenceLocation {
-                            range: self.node_range(name_node),
-                            is_definition: true,
-                        });
-                    }
-                }
+                    refs.push(ReferenceLocation {
+                        range: self.node_range(name_node),
+                        is_definition: true,
+                    });
+                };
             }
             "struct" | "enumdef" | "mdefn" => {
-                if let Some(name) = node.child_by_field_name("name") {
-                    if self.node_text(name, source) == symbol_name {
-                        refs.push(ReferenceLocation {
-                            range: self.node_range(name),
-                            is_definition: true,
-                        });
-                    }
+                if let Some(name) = node.child_by_field_name("name")
+                    && self.node_text(name, source) == symbol_name
+                {
+                    refs.push(ReferenceLocation {
+                        range: self.node_range(name),
+                        is_definition: true,
+                    });
                 }
             }
             "ldecl" => {
-                if let Some(name) = node.child_by_field_name("name") {
-                    if self.node_text(name, source) == symbol_name {
-                        refs.push(ReferenceLocation {
-                            range: self.node_range(name),
-                            is_definition: true,
-                        });
-                    }
+                if let Some(name) = node.child_by_field_name("name")
+                    && self.node_text(name, source) == symbol_name
+                {
+                    refs.push(ReferenceLocation {
+                        range: self.node_range(name),
+                        is_definition: true,
+                    });
                 }
             }
             _ => {}
@@ -1582,13 +1653,13 @@ impl ParserEngine {
             }
             // Type references (struct/enum usage in type positions)
             "tref" => {
-                if let Some(id) = node.child_by_field_name("id") {
-                    if self.node_text(id, source) == symbol_name {
-                        refs.push(ReferenceLocation {
-                            range: self.node_range(id),
-                            is_definition: false,
-                        });
-                    }
+                if let Some(id) = node.child_by_field_name("id")
+                    && self.node_text(id, source) == symbol_name
+                {
+                    refs.push(ReferenceLocation {
+                        range: self.node_range(id),
+                        is_definition: false,
+                    });
                 }
             }
             _ => {}
@@ -1624,10 +1695,10 @@ impl ParserEngine {
 
     /// Recursively collect import statements from the AST.
     fn collect_imports(&self, node: Node, source: &[u8], imports: &mut Vec<ImportInfo>) {
-        if node.kind() == "idecl" {
-            if let Some(import_info) = self.extract_import(node, source) {
-                imports.push(import_info);
-            }
+        if node.kind() == "idecl"
+            && let Some(import_info) = self.extract_import(node, source)
+        {
+            imports.push(import_info);
         }
 
         // Recurse into children
@@ -1758,12 +1829,11 @@ impl ParserEngine {
 
     /// Recursively search AST for a ledger declaration matching the variable name.
     fn find_variable_type(&self, node: Node, source: &[u8], variable_name: &str) -> Option<String> {
-        if node.kind() == "ldecl" {
-            if let Some(name) = self.get_field_text(node, "name", source) {
-                if name == variable_name {
-                    return self.get_field_text(node, "type", source);
-                }
-            }
+        if node.kind() == "ldecl"
+            && let Some(name) = self.get_field_text(node, "name", source)
+            && name == variable_name
+        {
+            return self.get_field_text(node, "type", source);
         }
 
         let mut cursor = node.walk();
@@ -2065,9 +2135,11 @@ export circuit demo(data: Bytes<32>): Bytes<16> {
         );
         // The circuit is still discoverable as a symbol.
         let symbols = parser.get_completion_symbols(source);
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "demo" && s.kind == CompletionSymbolKind::Function));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "demo" && s.kind == CompletionSymbolKind::Function)
+        );
         // The `new type` alias appears in the document-symbol outline.
         let doc_symbols = parser.document_symbols(source);
         assert!(
@@ -2165,15 +2237,21 @@ enum Color {
         let symbols = parser.get_completion_symbols(source);
 
         // Should find circuit, struct, and enum
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "add" && s.kind == CompletionSymbolKind::Function));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Point" && s.kind == CompletionSymbolKind::Struct));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Color" && s.kind == CompletionSymbolKind::Enum));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "add" && s.kind == CompletionSymbolKind::Function)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Point" && s.kind == CompletionSymbolKind::Struct)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Color" && s.kind == CompletionSymbolKind::Enum)
+        );
     }
 
     #[test]

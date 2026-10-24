@@ -22,10 +22,10 @@ use crate::version::LanguageVersion;
 
 /// The Compact devtools artifact directory: `$COMPACT_DIRECTORY` or `~/.compact`.
 pub(crate) fn compact_directory() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("COMPACT_DIRECTORY") {
-        if !dir.is_empty() {
-            return Some(PathBuf::from(dir));
-        }
+    if let Ok(dir) = std::env::var("COMPACT_DIRECTORY")
+        && !dir.is_empty()
+    {
+        return Some(PathBuf::from(dir));
     }
     std::env::var("HOME")
         .ok()
@@ -84,11 +84,12 @@ impl DiagnosticEngine {
     /// 4. `compactc.bin` on `PATH`
     fn find_compiler() -> Option<String> {
         // 1. Check environment variable
-        if let Ok(path) = std::env::var("COMPACT_COMPILER") {
-            if !path.is_empty() && std::path::Path::new(&path).exists() {
-                tracing::info!("Found compiler via COMPACT_COMPILER env: {}", path);
-                return Some(path);
-            }
+        if let Ok(path) = std::env::var("COMPACT_COMPILER")
+            && !path.is_empty()
+            && std::path::Path::new(&path).exists()
+        {
+            tracing::info!("Found compiler via COMPACT_COMPILER env: {}", path);
+            return Some(path);
         }
 
         // 2. Compact devtools active toolchain.
@@ -111,13 +112,13 @@ impl DiagnosticEngine {
 
         // 4. Check PATH
         for name in ["compactc.bin", "compactc"] {
-            if let Ok(output) = std::process::Command::new("which").arg(name).output() {
-                if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !path.is_empty() {
-                        tracing::info!("Found compiler in PATH: {}", path);
-                        return Some(path);
-                    }
+            if let Ok(output) = std::process::Command::new("which").arg(name).output()
+                && output.status.success()
+            {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    tracing::info!("Found compiler in PATH: {}", path);
+                    return Some(path);
                 }
             }
         }

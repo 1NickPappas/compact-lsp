@@ -485,13 +485,13 @@ impl CompactLanguageServer {
         };
 
         for import in file_imports {
-            if import.is_file {
-                if let Some(imported_uri) = imports::resolve_import_path(uri, &import.path) {
-                    self.reverse_dependencies
-                        .entry(imported_uri)
-                        .or_default()
-                        .push(uri.to_string());
-                }
+            if import.is_file
+                && let Some(imported_uri) = imports::resolve_import_path(uri, &import.path)
+            {
+                self.reverse_dependencies
+                    .entry(imported_uri)
+                    .or_default()
+                    .push(uri.to_string());
             }
         }
     }
@@ -616,14 +616,14 @@ impl CompactLanguageServer {
             if !import.is_file {
                 continue;
             }
-            if let Some(resolved) = imports::resolve_import_path(searching_file, &import.path) {
-                if resolved == defining_file {
-                    let prefixed_name = match &import.prefix {
-                        Some(prefix) => format!("{}{}", prefix, symbol_name),
-                        None => symbol_name.to_string(),
-                    };
-                    names.push(prefixed_name);
-                }
+            if let Some(resolved) = imports::resolve_import_path(searching_file, &import.path)
+                && resolved == defining_file
+            {
+                let prefixed_name = match &import.prefix {
+                    Some(prefix) => format!("{}{}", prefix, symbol_name),
+                    None => symbol_name.to_string(),
+                };
+                names.push(prefixed_name);
             }
         }
 
@@ -937,31 +937,33 @@ impl LanguageServer for CompactLanguageServer {
             }
         }
 
-        let file_imports = if let Some(doc) = self.documents.get(&uri) {
-            let content = doc.content.to_string();
+        let file_imports = match self.documents.get(&uri) {
+            Some(doc) => {
+                let content = doc.content.to_string();
 
-            let symbols = {
-                let mut parser = self.parser_engine.lock().unwrap();
-                parser.get_completion_symbols(&content)
-            };
+                let symbols = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.get_completion_symbols(&content)
+                };
 
-            for sym in symbols {
-                items.push(CompletionItem {
-                    label: sym.name.clone(),
-                    kind: Some(symbol_to_lsp_kind(sym.kind)),
-                    detail: sym.detail,
-                    insert_text: Some(sym.name),
-                    ..Default::default()
-                });
+                for sym in symbols {
+                    items.push(CompletionItem {
+                        label: sym.name.clone(),
+                        kind: Some(symbol_to_lsp_kind(sym.kind)),
+                        detail: sym.detail,
+                        insert_text: Some(sym.name),
+                        ..Default::default()
+                    });
+                }
+
+                {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.get_imports(&content)
+                }
             }
-
-            let file_imports = {
-                let mut parser = self.parser_engine.lock().unwrap();
-                parser.get_imports(&content)
-            };
-            file_imports
-        } else {
-            vec![]
+            _ => {
+                vec![]
+            }
         };
 
         for import in &file_imports {
@@ -1680,26 +1682,26 @@ impl LanguageServer for CompactLanguageServer {
             None => return Ok(None),
         };
 
-        if let Some((file_uri, symbol)) = self.find_imported_symbol(&uri_string, &word) {
-            if let Some(loc) = symbol.location {
-                let target_uri = match Uri::from_str(&file_uri) {
-                    Ok(u) => u,
-                    Err(_) => return Ok(None),
-                };
-                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                    uri: target_uri,
-                    range: Range {
-                        start: Position {
-                            line: loc.start_line,
-                            character: loc.start_char,
-                        },
-                        end: Position {
-                            line: loc.end_line,
-                            character: loc.end_char,
-                        },
+        if let Some((file_uri, symbol)) = self.find_imported_symbol(&uri_string, &word)
+            && let Some(loc) = symbol.location
+        {
+            let target_uri = match Uri::from_str(&file_uri) {
+                Ok(u) => u,
+                Err(_) => return Ok(None),
+            };
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range: Range {
+                    start: Position {
+                        line: loc.start_line,
+                        character: loc.start_char,
                     },
-                })));
-            }
+                    end: Position {
+                        line: loc.end_line,
+                        character: loc.end_char,
+                    },
+                },
+            })));
         }
 
         // Built-in type name lookup (e.g., "Counter" in "ledger round: Counter;")
@@ -1797,39 +1799,39 @@ impl LanguageServer for CompactLanguageServer {
                 None => return Ok(None),
             };
 
-        if let Some((_file_uri, symbol)) = self.find_imported_symbol(&uri, &func_name) {
-            if let Some(detail) = &symbol.detail {
-                let active_param =
-                    utils::count_commas_before_cursor(&content, position.line, position.character);
-                let params = utils::parse_params_from_detail(detail);
+        if let Some((_file_uri, symbol)) = self.find_imported_symbol(&uri, &func_name)
+            && let Some(detail) = &symbol.detail
+        {
+            let active_param =
+                utils::count_commas_before_cursor(&content, position.line, position.character);
+            let params = utils::parse_params_from_detail(detail);
 
-                let parameters: Vec<ParameterInformation> = params
-                    .iter()
-                    .map(|p| ParameterInformation {
-                        label: ParameterLabel::Simple(p.clone()),
-                        documentation: None,
+            let parameters: Vec<ParameterInformation> = params
+                .iter()
+                .map(|p| ParameterInformation {
+                    label: ParameterLabel::Simple(p.clone()),
+                    documentation: None,
+                })
+                .collect();
+
+            let label = format!("circuit {}{}", func_name, detail);
+            let signature = SignatureInformation {
+                label,
+                documentation: symbol.documentation.map(|d| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: d,
                     })
-                    .collect();
+                }),
+                parameters: Some(parameters),
+                active_parameter: Some(active_param),
+            };
 
-                let label = format!("circuit {}{}", func_name, detail);
-                let signature = SignatureInformation {
-                    label,
-                    documentation: symbol.documentation.map(|d| {
-                        Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: d,
-                        })
-                    }),
-                    parameters: Some(parameters),
-                    active_parameter: Some(active_param),
-                };
-
-                return Ok(Some(SignatureHelp {
-                    signatures: vec![signature],
-                    active_signature: Some(0),
-                    active_parameter: Some(active_param),
-                }));
-            }
+            return Ok(Some(SignatureHelp {
+                signatures: vec![signature],
+                active_signature: Some(0),
+                active_parameter: Some(active_param),
+            }));
         }
 
         // Stdlib circuit function signature help

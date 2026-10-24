@@ -44,7 +44,7 @@ cargo fmt --all --check        # CI fails if not formatted
 cargo clippy --all-targets --all-features -- -D warnings  # CI fails on any warning
 ```
 
-CI (`.github/workflows/ci.yml`) runs fmt-check, clippy (warnings-as-errors), build, and test. Match all four locally before pushing. Edition 2021, `max_width = 100` (`rustfmt.toml`).
+CI (`.github/workflows/ci.yml`) runs fmt-check, clippy (warnings-as-errors), build, and test. Match all four locally before pushing. Edition 2024, `max_width = 100` (`rustfmt.toml`).
 
 ### Debugging
 
