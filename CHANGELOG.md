@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return type is used as the container type and the field type is read from the workspace struct or
   the standard-library registry (`Maybe<T>.value` → `T`, `Either<A, B>.left` → `A`), with the
   receiver's generic arguments substituted.
+- **Generic type-parameter instantiation**: a generic circuit's return type is instantiated from the
+  argument types at the call site (`circuit id<T>(x: T): T` called as `id(token)` resolves to
+  `token`'s type), and generic struct fields substitute the receiver's arguments (`Box<Token>.value`
+  → `Token`).
 
 ## [0.4.0] - 2026-10-24
 

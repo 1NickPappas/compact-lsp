@@ -17,9 +17,9 @@ pub mod version;
 pub use diagnostics::DiagnosticEngine;
 pub use formatter::FormatterEngine;
 pub use parser::{
-    CompletionSymbol, CompletionSymbolKind, ContractCircuit, ContractTypeInfo, DefinitionLocation,
-    HoverInfo, ImportInfo, MemberAccessContext, MemberBase, ParameterInfo, ParserEngine,
-    ReferenceLocation, SemanticToken, SemanticTokenModifier, SemanticTokenType, SignatureInfo,
-    SymbolLocation, SyntaxError, is_builtin_type,
+    CallableSignature, CompletionSymbol, CompletionSymbolKind, ContractCircuit, ContractTypeInfo,
+    DefinitionLocation, HoverInfo, ImportInfo, MemberAccessContext, MemberBase, ParameterInfo,
+    ParserEngine, ReferenceLocation, SemanticToken, SemanticTokenModifier, SemanticTokenType,
+    SignatureInfo, SymbolLocation, SyntaxError, is_builtin_type,
 };
 pub use version::LanguageVersion;

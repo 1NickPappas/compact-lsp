@@ -702,6 +702,49 @@ impl CompactLanguageServer {
         Some((raw, callee_uri))
     }
 
+    /// Resolve a (possibly generic) call's return type, instantiating generic
+    /// parameters from the argument types at this call site. Type names stay in
+    /// the callee's file scope.
+    fn resolve_call_raw_type(
+        &self,
+        uri: &str,
+        content: &str,
+        callee: &str,
+        args: &[MemberBase],
+    ) -> Option<(String, String)> {
+        let (callee_uri, callee_symbol) = self.find_symbol_anywhere(uri, callee)?;
+        let callee_content = self.source_for(&callee_uri)?;
+        let signature = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_callable_signature(&callee_content, &callee_symbol.name)?
+        };
+        let return_type = signature.return_type?;
+        if signature.generic_params.is_empty() {
+            return Some((return_type, callee_uri));
+        }
+        // Infer each generic parameter from an argument whose declared parameter
+        // type is exactly that parameter (`circuit id<T>(x: T)` + `id(token)`).
+        let params = builtins::parse_type_params(&signature.generic_params);
+        let mut type_args: Vec<String> = params.iter().map(|p| p.to_string()).collect();
+        for (i, param_type) in signature.param_types.iter().enumerate() {
+            let param_type = param_type.trim();
+            if let Some(idx) = params.iter().position(|p| *p == param_type)
+                && let Some(Some(actual)) = args.get(i).map(|arg| {
+                    self.resolve_base_raw_type(uri, content, arg)
+                        .map(|(t, _)| t)
+                })
+            {
+                type_args[idx] = actual;
+            }
+        }
+        let instantiated = builtins::substitute_generic_params(
+            &return_type,
+            &signature.generic_params,
+            &type_args,
+        );
+        Some((instantiated, callee_uri))
+    }
+
     /// Resolve a member-access base to its declared type text and the file scope
     /// in which that text is written. Generics are preserved (needed to extract
     /// a container's element type for index access).
@@ -721,18 +764,27 @@ impl CompactLanguageServer {
                 let mut scope_uri = uri.to_string();
                 let mut scope_content = content.to_string();
                 for member in &chain[1..] {
+                    let args = generic_args(&raw);
                     let (struct_uri, struct_content, struct_name) =
                         self.find_struct_home(&scope_uri, &scope_content, &raw)?;
-                    raw = {
+                    let (field_raw, params) = {
                         let mut parser = self.parser_engine.lock().unwrap();
-                        parser.get_struct_field_type(&struct_content, &struct_name, member)?
+                        (
+                            parser.get_struct_field_type(&struct_content, &struct_name, member)?,
+                            parser
+                                .get_struct_type_params(&struct_content, &struct_name)
+                                .unwrap_or_default(),
+                        )
                     };
+                    raw = builtins::substitute_generic_params(&field_raw, &params, &args);
                     scope_uri = struct_uri;
                     scope_content = struct_content;
                 }
                 Some((raw, scope_uri))
             }
-            MemberBase::Call(callee) => self.resolve_callee_raw_type(uri, callee),
+            MemberBase::Call { callee, args } => {
+                self.resolve_call_raw_type(uri, content, callee, args)
+            }
             MemberBase::MethodCall(receiver, method) => {
                 let (recv_raw, scope_uri) = self.resolve_base_raw_type(uri, content, receiver)?;
                 let head = builtins::extract_base_type(&recv_raw).trim();
@@ -766,10 +818,18 @@ impl CompactLanguageServer {
                 if let Some((struct_uri, struct_content, struct_name)) =
                     self.find_struct_home(&scope_uri, &scope_content, &recv_raw)
                 {
-                    let field_type = {
+                    let args = generic_args(&recv_raw);
+                    let (field_raw, params) = {
                         let mut parser = self.parser_engine.lock().unwrap();
-                        parser.get_struct_field_type(&struct_content, &struct_name, field)
-                    }?;
+                        (
+                            parser.get_struct_field_type(&struct_content, &struct_name, field)?,
+                            parser
+                                .get_struct_type_params(&struct_content, &struct_name)
+                                .unwrap_or_default(),
+                        )
+                    };
+                    let field_type =
+                        builtins::substitute_generic_params(&field_raw, &params, &args);
                     return Some((field_type, struct_uri));
                 }
                 // (b) A standard-library struct (`Maybe`, `Either`, …), with
@@ -2729,11 +2789,15 @@ fn parse_base_text(text: &str) -> MemberBase {
         && let Some(open) = matching_open(text, '(', ')')
     {
         let callee = text[..open].trim();
+        let args = split_top_level_args(&text[open + 1..text.len() - 1]);
         return match callee.rsplit_once('.') {
             Some((receiver, method)) if !receiver.is_empty() && !method.is_empty() => {
                 MemberBase::MethodCall(Box::new(parse_base_text(receiver)), method.to_string())
             }
-            _ if !callee.is_empty() => MemberBase::Call(callee.to_string()),
+            _ if !callee.is_empty() => MemberBase::Call {
+                callee: callee.to_string(),
+                args,
+            },
             _ => MemberBase::Other,
         };
     }
@@ -2755,6 +2819,32 @@ fn parse_base_text(text: &str) -> MemberBase {
         }
     }
     MemberBase::Path(text.split('.').map(str::to_string).collect())
+}
+
+/// Split a call's argument list on top-level commas and parse each argument.
+fn split_top_level_args(text: &str) -> Vec<MemberBase> {
+    let mut args = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let piece = text[start..i].trim();
+                if !piece.is_empty() {
+                    args.push(parse_base_text(piece));
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let piece = text[start..].trim();
+    if !piece.is_empty() {
+        args.push(parse_base_text(piece));
+    }
+    args
 }
 
 /// The index of the opening bracket matching the final closing bracket.

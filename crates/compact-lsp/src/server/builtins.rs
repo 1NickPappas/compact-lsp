@@ -151,7 +151,7 @@ fn type_param_names(type_name: &str) -> Vec<&'static str> {
 }
 
 /// Parse the parameter names out of a `<...>` declaration (`<K, V>` → `["K", "V"]`).
-fn parse_type_params(type_params: &str) -> Vec<&str> {
+pub(crate) fn parse_type_params(type_params: &str) -> Vec<&str> {
     type_params
         .trim()
         .trim_start_matches('<')

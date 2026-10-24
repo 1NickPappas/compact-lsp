@@ -1180,3 +1180,82 @@ circuit useIt(): Boolean {
     assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
     client.shutdown();
 }
+
+/// Generic type parameters, instantiated at the call site:
+/// `id(token).transfer(...)` where `circuit id<T>(x: T): T` and `token` is the
+/// contract type. The return type `T` is substituted from the argument.
+#[test]
+fn test_member_generic_call_base() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+circuit id<T>(x: T): T { return x; }
+
+circuit useIt(token: T_Token): Boolean {
+    return id(token).transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
+    client.shutdown();
+}
+
+/// Generic struct field substitution: `box.value.transfer(...)` where
+/// `struct Box<T> { value: T }` and `box: Box<Token>`.
+#[test]
+fn test_member_generic_struct_field() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import "./token" prefix T_;
+
+struct Box<T> { value: T; }
+
+ledger box: Box<T_Token>;
+
+circuit useIt(): Boolean {
+    return box.value.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, 8, "token.compact", 2);
+    client.shutdown();
+}

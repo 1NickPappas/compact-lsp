@@ -143,8 +143,12 @@ pub enum SemanticTokenModifier {
 pub enum MemberBase {
     /// A dotted identifier path, root first (`w.token` → ["w", "token"]).
     Path(Vec<String>),
-    /// A call to a circuit/function (`make()`, `F_make()`).
-    Call(String),
+    /// A call to a circuit/function (`make()`, `id(token)`), carrying the
+    /// argument expressions for generic inference at the call site.
+    Call {
+        callee: String,
+        args: Vec<MemberBase>,
+    },
     /// A method call on a receiver (`factory.create()`, `map.lookup(k)`).
     MethodCall(Box<MemberBase>, String),
     /// Field access on a non-path receiver (`list.head().value`, `arr[i].field`).
@@ -175,6 +179,18 @@ pub struct ReferenceLocation {
     pub range: Range,
     /// True if this is the definition site, false if it's a usage.
     pub is_definition: bool,
+}
+
+/// A callable's declared signature (circuit or witness), used to instantiate
+/// generic parameters at a call site.
+#[derive(Debug, Clone)]
+pub struct CallableSignature {
+    /// Parameter type texts, in order (`circuit id<T>(x: T)` → `["T"]`).
+    pub param_types: Vec<String>,
+    /// Generic parameter declaration text (`"<T>"`), empty when not generic.
+    pub generic_params: String,
+    /// Declared return type text, if any.
+    pub return_type: Option<String>,
 }
 
 /// A circuit declared by a contract type (`ecdecl`).

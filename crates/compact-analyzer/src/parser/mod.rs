@@ -1963,13 +1963,23 @@ impl ParserEngine {
                     _ => MemberBase::Other,
                 }
             }
-            "function_call_term" => match node
-                .child_by_field_name("fun")
-                .and_then(|fun| fun.child_by_field_name("id"))
-            {
-                Some(id) => MemberBase::Call(self.node_text(id, source)),
-                None => MemberBase::Other,
-            },
+            "function_call_term" => {
+                let callee = node
+                    .child_by_field_name("fun")
+                    .and_then(|fun| fun.child_by_field_name("id"))
+                    .map(|id| self.node_text(id, source));
+                match callee {
+                    Some(callee) => {
+                        let mut args = Vec::new();
+                        let mut cursor = node.walk();
+                        for arg in node.children_by_field_name("expr", &mut cursor) {
+                            args.push(self.member_base(arg, source));
+                        }
+                        MemberBase::Call { callee, args }
+                    }
+                    None => MemberBase::Other,
+                }
+            }
             "index_access_expr" => match node.child_by_field_name("base") {
                 Some(base) => MemberBase::Index(Box::new(self.member_base(base, source))),
                 None => MemberBase::Other,
@@ -1989,7 +1999,7 @@ impl ParserEngine {
     fn member_base_display(base: &MemberBase) -> String {
         match base {
             MemberBase::Path(path) => path.join("."),
-            MemberBase::Call(callee) => format!("{}()", callee),
+            MemberBase::Call { callee, .. } => format!("{}()", callee),
             MemberBase::MethodCall(receiver, method) => {
                 format!("{}.{}()", Self::member_base_display(receiver), method)
             }
@@ -2034,6 +2044,17 @@ impl ParserEngine {
             }
         }
         None
+    }
+
+    /// Declared generic parameters of a `struct` (`struct Box<T>` → `"<T>"`),
+    /// or `None` when the struct is not generic.
+    pub fn get_struct_type_params(&mut self, source: &str, struct_name: &str) -> Option<String> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+        let resolved = self.resolve_type_name(root, source_bytes, struct_name);
+        let struct_node = self.find_struct(root, source_bytes, &resolved)?;
+        self.get_field_text(struct_node, "gparams", source_bytes)
     }
 
     /// Recursively find a `struct` named `name`.
@@ -2086,6 +2107,52 @@ impl ParserEngine {
     pub fn get_callable_return_type(&mut self, source: &str, name: &str) -> Option<String> {
         let tree = self.parse(source)?;
         self.find_callable_return_type(tree.root_node(), source.as_bytes(), name)
+    }
+
+    /// Declared signature (parameter types, generic params, return type) of a
+    /// circuit or witness by name (`circuit id<T>(x: T): T`).
+    pub fn get_callable_signature(
+        &mut self,
+        source: &str,
+        name: &str,
+    ) -> Option<CallableSignature> {
+        let tree = self.parse(source)?;
+        self.find_callable_signature(tree.root_node(), source.as_bytes(), name)
+    }
+
+    fn find_callable_signature(
+        &self,
+        node: Node,
+        source: &[u8],
+        name: &str,
+    ) -> Option<CallableSignature> {
+        if matches!(node.kind(), "cdefn" | "wdecl" | "ecdecl_circuit")
+            && self.get_field_text(node, "id", source).as_deref() == Some(name)
+        {
+            let mut param_types = Vec::new();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if matches!(child.kind(), "parg" | "arg")
+                    && let Some(ty) = self.get_field_text(child, "type", source)
+                {
+                    param_types.push(ty);
+                }
+            }
+            return Some(CallableSignature {
+                param_types,
+                generic_params: self
+                    .get_field_text(node, "gparams", source)
+                    .unwrap_or_default(),
+                return_type: self.get_field_text(node, "type", source),
+            });
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_callable_signature(child, source, name) {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// For an unannotated `const x = f();` binding, return the callee name `f`.
@@ -3381,7 +3448,13 @@ circuit useIndex(): Boolean {
         let ctx = parser
             .get_member_access_context(source, line, col)
             .expect("call base context");
-        assert_eq!(ctx.base, MemberBase::Call("make".to_string()));
+        assert_eq!(
+            ctx.base,
+            MemberBase::Call {
+                callee: "make".to_string(),
+                args: vec![],
+            }
+        );
         assert_eq!(ctx.member_name, "transfer");
 
         let line = 8;
@@ -3467,6 +3540,63 @@ circuit useIt(items: List<Token>): Boolean {
         );
         assert_eq!(ctx.base_name, "items.head().value");
         assert_eq!(ctx.member_name, "transfer");
+    }
+
+    #[test]
+    fn test_member_base_call_args() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit id<T>(x: T): T { return x; }
+circuit useIt(token: Token): Boolean {
+    return id(token).transfer(0);
+}
+"#;
+        let line = 3;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("call-with-args base");
+        assert_eq!(
+            ctx.base,
+            MemberBase::Call {
+                callee: "id".to_string(),
+                args: vec![MemberBase::Path(vec!["token".to_string()])],
+            }
+        );
+        assert_eq!(ctx.base_name, "id()");
+    }
+
+    #[test]
+    fn test_callable_signature_generic() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit id<T>(x: T): T { return x; }
+circuit plain(a: Field): Boolean { return true; }
+"#;
+        let sig = parser.get_callable_signature(source, "id").unwrap();
+        assert_eq!(sig.param_types, vec!["T".to_string()]);
+        assert_eq!(sig.generic_params, "<T>");
+        assert_eq!(sig.return_type.as_deref(), Some("T"));
+
+        let plain = parser.get_callable_signature(source, "plain").unwrap();
+        assert_eq!(plain.param_types, vec!["Field".to_string()]);
+        assert!(plain.generic_params.is_empty());
+        assert_eq!(plain.return_type.as_deref(), Some("Boolean"));
+    }
+
+    #[test]
+    fn test_struct_type_params() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+struct Box<T> { value: T; }
+struct Plain { n: Uint<64>; }
+"#;
+        assert_eq!(
+            parser.get_struct_type_params(source, "Box").as_deref(),
+            Some("<T>")
+        );
+        assert_eq!(parser.get_struct_type_params(source, "Plain"), None);
     }
 
     #[test]
