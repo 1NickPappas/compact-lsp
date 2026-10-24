@@ -56,22 +56,30 @@ contract Token {
   circuit transfer(to: Address, amount: Uint<64>): Boolean;
 }
 
-contract implements Token;          // completion offers `Token`
+contract implements Token;                              // completion offers `Token`
 
-circuit useIt(ref: Token): Boolean {
-  return ref.transfer(to, amount);  // completion, hover, go-to-def, signature help
+circuit useIt(ref: Token, to: Address, amount: Uint<64>): Boolean {
+  return ref.transfer(to, amount);                      // completion, hover, go-to-def, signature help
 }
 ```
 
-### Missing Things
+The contract type may live in another file: import it (`import "./Token";` or
+`import "./Token" prefix T_;`) and the features work **across files** — including when the
+defining file is not open, resolved from the workspace scan. `contract implements` requires
+language 0.26+.
 
-| Feature | Status |
-|---------|--------|
-| Code Actions | TODO |
+### Known Limitations
+
+| Area | Status |
+|------|--------|
+| Code Actions | Not implemented |
+| Contract-reference typing | Heuristic: resolves `parg` / `const` / `ledger` type annotations; no full type inference (e.g. values produced by generic expressions) |
+| Find References / Rename for contract-type circuits | Follows value symbols today; cross-contract circuit rename is not yet wired |
+| Range formatting | `format-compact` is whole-document only |
 
 ## Requirements
 
-- Rust toolchain (for building)
+- Rust toolchain **1.90+** (for building; pinned in `rust-toolchain.toml`)
 - Compact devtools (`compact`) with a toolchain in **0.31.1 – 0.35.0** — install the one you
   target with `compact update 0.31.1` (or `0.34.0` / `0.35.0`). Provides `compactc` (diagnostics)
   and `format-compact` (formatting).
@@ -132,10 +140,12 @@ The LSP auto-detects the `compactc` compiler:
 3. `~/compactc/compactc.bin`
 4. `compactc.bin` / `compactc` in `PATH`
 
-The detected language version gates registry symbols added after 0.23.0 (e.g. `keccak256`, which is
-hidden on the mainnet 0.23.0 compiler). When no compiler is found, gating is disabled and all
-symbols are shown. `format-compact` is found the same way (`COMPACT_FORMATTER`, then the devtools
-`bin/`, then `PATH`).
+The detected language version gates registry symbols: each entry carries a `min_language_version`
+and an exclusive `max_language_version`, so symbols added after 0.23.0 (e.g. `keccak256`) or removed
+in a later version are hidden appropriately. When no compiler is found, gating is disabled and all
+symbols are shown. On toolchains where the ZKIR-v3 backend is opt-in (0.34.100 – 0.35.104), the LSP
+passes `--feature-zkir-v3` automatically. `format-compact` is found the same way
+(`COMPACT_FORMATTER`, then the devtools `bin/`, then `PATH`).
 
 ## Development
 
@@ -146,9 +156,12 @@ cargo build --release
 cargo test
 ```
 
-GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` job that installs toolchain
-0.31.1 and runs the registry probe tests (which skip themselves when no compiler is present).
+GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` **matrix** over toolchains
+**0.31.1, 0.34.0, and 0.35.0** that runs the registry probe tests against each (they skip themselves
+when no compiler is present). The end-to-end LSP tests spawn the server binary and speak JSON-RPC
+over stdio.
 
+- **Changelog** — see [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 - **Releasing** — see [`RELEASING.md`](./RELEASING.md); cut a release with `scripts/release.sh`.
 - **Upstream tracking** — see [`UPSTREAM_RELEASES.md`](./UPSTREAM_RELEASES.md); the weekly
   `upstream-watch` workflow files an issue when a newer Compact toolchain ships.
