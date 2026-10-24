@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Updated all direct dependencies to their latest stable versions: `tree-sitter` 0.25 → 0.27,
+  `toml` 0.8 → 1, `ls-types` 0.0.2 → 0.0.6, plus the latest `tokio`, `serde`, `serde_json`,
+  `dashmap`, `tracing`, `regex`, `tempfile`, and `anyhow`. Removed the unused `thiserror`
+  dependency.
+- Set the new `offset_encoding` field on `InitializeResult` (added in `ls-types` 0.0.6) to `None`
+  to keep the client's default UTF-16 positions.
+
 ## [0.2.1] - 2026-10-23
 
 ### Added

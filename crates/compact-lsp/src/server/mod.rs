@@ -729,6 +729,9 @@ impl LanguageServer for CompactLanguageServer {
                 name: "compact-lsp".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
+            // Keep the client's default offset encoding (UTF-16); we do not
+            // implement the clangd UTF-8 offsets extension.
+            offset_encoding: None,
         })
     }
 

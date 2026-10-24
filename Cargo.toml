@@ -32,7 +32,7 @@ tower-lsp = { package = "tower-lsp-server", version = "0.23" }
 
 # LSP types (Diagnostic, Position, Range, etc.)
 # tower-lsp-server uses ls-types (fork of lsp-types)
-lsp-types = { package = "ls-types", version = "0.0.2" }
+lsp-types = { package = "ls-types", version = "0.0.6" }
 
 # Async runtime - needed because LSP is inherently async (multiple requests in flight)
 # Using LTS version for stability (supported until Sep 2026)
@@ -56,7 +56,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
 anyhow = "1"      # For application errors (main binary)
-thiserror = "1"   # For library errors (compact-analyzer)
 
 # Parsing compiler output
 regex = "1"
@@ -65,11 +64,11 @@ regex = "1"
 tempfile = "3"
 
 # TOML parsing for data-driven registries
-toml = "0.8"
+toml = "1"
 
 # Tree-sitter for parsing.
 # Grammar comes from crates.io (`tree-sitter-compact`), maintained from
 # https://github.com/1NickPappas/compact-tree-sitter. This replaces the git
 # dependency on the archived midnightntwrk/compact-tree-sitter repo.
-tree-sitter = "0.25"
+tree-sitter = "0.27"
 tree-sitter-compact = "0.2.0"

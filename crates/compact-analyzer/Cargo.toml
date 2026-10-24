@@ -24,7 +24,6 @@ tokio.workspace = true
 
 # Error handling for library code
 anyhow.workspace = true
-thiserror.workspace = true
 
 # Parse compiler error output
 regex.workspace = true
