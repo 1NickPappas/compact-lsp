@@ -38,6 +38,8 @@ pub fn is_keyword(name: &str) -> bool {
             | "new"
             | "from"
             | "slice"
+            | "implements"
+            | "emit"
     )
 }
 
@@ -84,6 +86,9 @@ mod tests {
         assert!(is_keyword("new"));
         assert!(is_keyword("from"));
         assert!(is_keyword("slice"));
+        // 0.26/0.27 keywords (reserved by the 0.35 compiler)
+        assert!(is_keyword("implements"));
+        assert!(is_keyword("emit"));
     }
 
     #[test]
@@ -128,6 +133,14 @@ mod tests {
         assert!(is_builtin_type("MerkleTreePathEntry"));
         assert!(is_builtin_type("MerkleTreePath"));
         assert!(is_builtin_type("ZswapCoinPublicKey"));
+        // 0.26/0.27 additions
+        assert!(is_builtin_type("PublicAddress"));
+        assert!(is_builtin_type("Curve25519Base"));
+        assert!(is_builtin_type("Curve25519Scalar"));
+        assert!(is_builtin_type("Curve25519Point"));
+        assert!(is_builtin_type("Secp256r1Base"));
+        assert!(is_builtin_type("Secp256r1Scalar"));
+        assert!(is_builtin_type("Secp256r1Point"));
     }
 
     #[test]

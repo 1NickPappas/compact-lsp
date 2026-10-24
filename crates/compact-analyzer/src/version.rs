@@ -59,6 +59,11 @@ impl LanguageVersion {
         *self >= Self::new(major, minor, patch)
     }
 
+    /// Whether this version is at most `major.minor.patch`.
+    pub fn at_most(&self, major: u32, minor: u32, patch: u32) -> bool {
+        *self <= Self::new(major, minor, patch)
+    }
+
     /// The version as a `(major, minor, patch)` tuple.
     pub fn as_tuple(&self) -> (u32, u32, u32) {
         (self.major, self.minor, self.patch)
@@ -138,6 +143,11 @@ mod tests {
         assert!(v103.at_least(0, 23, 103));
         assert!(v103.at_least(0, 23, 0));
         assert!(!v103.at_least(0, 24, 0));
+
+        assert!(v0.at_most(0, 23, 0));
+        assert!(!v0.at_most(0, 22, 99));
+        assert!(v103.at_most(0, 23, 103));
+        assert!(v103.at_most(0, 24, 0));
     }
 
     #[test]

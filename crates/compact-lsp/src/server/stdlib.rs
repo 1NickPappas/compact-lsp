@@ -26,6 +26,9 @@ pub struct StdlibStruct {
     /// Minimum language version required to use this symbol.
     /// Empty means it is available in every version.
     pub min_language_version: &'static str,
+    /// Exclusive upper bound: the language version in which this symbol was
+    /// removed. Empty means it is not removed in any supported version.
+    pub max_language_version: &'static str,
     pub fields: Vec<StdlibField>,
 }
 
@@ -48,6 +51,9 @@ pub struct StdlibCircuit {
     /// Minimum language version required to use this symbol.
     /// Empty means it is available in every version.
     pub min_language_version: &'static str,
+    /// Exclusive upper bound: the language version in which this symbol was
+    /// removed. Empty means it is not removed in any supported version.
+    pub max_language_version: &'static str,
 }
 
 // ── TOML deserialization structures ─────────────────────────────────
@@ -69,6 +75,8 @@ struct StructDef {
     doc_url: String,
     #[serde(default)]
     min_language_version: String,
+    #[serde(default)]
+    max_language_version: String,
     fields: Vec<FieldDef>,
 }
 
@@ -91,6 +99,8 @@ struct CircuitDef {
     doc_url: String,
     #[serde(default)]
     min_language_version: String,
+    #[serde(default)]
+    max_language_version: String,
 }
 
 // ── Parsed + converted registry ─────────────────────────────────────
@@ -116,6 +126,7 @@ fn stdlib() -> &'static ParsedStdlib {
                 description: Box::leak(s.description.into_boxed_str()),
                 doc_url: Box::leak(s.doc_url.into_boxed_str()),
                 min_language_version: Box::leak(s.min_language_version.into_boxed_str()),
+                max_language_version: Box::leak(s.max_language_version.into_boxed_str()),
                 fields: s
                     .fields
                     .into_iter()
@@ -139,6 +150,7 @@ fn stdlib() -> &'static ParsedStdlib {
                 doc: Box::leak(c.doc.into_boxed_str()),
                 doc_url: Box::leak(c.doc_url.into_boxed_str()),
                 min_language_version: Box::leak(c.min_language_version.into_boxed_str()),
+                max_language_version: Box::leak(c.max_language_version.into_boxed_str()),
             })
             .collect();
 
@@ -148,20 +160,35 @@ fn stdlib() -> &'static ParsedStdlib {
 
 // ── Version gating ──────────────────────────────────────────────────
 
-/// Whether an entry with the given `min_language_version` is available for a
-/// detected `language` version.
+/// Whether an entry restricted to `[min_language_version, max_language_version)`
+/// is available for a detected `language` version.
 ///
-/// An empty minimum, an unparseable minimum, or an unknown detected version
-/// (no compiler) all mean "available". The LSP errs toward showing symbols
-/// rather than hiding them when it cannot verify the target version.
-pub(crate) fn is_available(min_language_version: &str, language: Option<LanguageVersion>) -> bool {
-    if min_language_version.is_empty() {
+/// - An empty or unparseable bound means "no bound on that side".
+/// - `max_language_version` is **exclusive**: set it to the language version in
+///   which a symbol was removed (the symbol is hidden at that version and newer).
+/// - An unknown detected version (no compiler) disables gating, so symbols are
+///   shown rather than hidden when the target cannot be verified.
+pub(crate) fn is_available_range(
+    min_language_version: &str,
+    max_language_version: &str,
+    language: Option<LanguageVersion>,
+) -> bool {
+    let Some(detected) = language else {
         return true;
+    };
+    if !min_language_version.is_empty()
+        && let Some(min) = LanguageVersion::parse(min_language_version)
+        && detected < min
+    {
+        return false;
     }
-    match (LanguageVersion::parse(min_language_version), language) {
-        (Some(min), Some(detected)) => detected >= min,
-        _ => true,
+    if !max_language_version.is_empty()
+        && let Some(max) = LanguageVersion::parse(max_language_version)
+        && detected >= max
+    {
+        return false;
     }
+    true
 }
 
 // ── Lookup API ──────────────────────────────────────────────────────
@@ -182,7 +209,7 @@ pub fn find_stdlib_struct_for(
     language: Option<LanguageVersion>,
 ) -> Option<&'static StdlibStruct> {
     let st = find_stdlib_struct(name)?;
-    is_available(st.min_language_version, language).then_some(st)
+    is_available_range(st.min_language_version, st.max_language_version, language).then_some(st)
 }
 
 /// Find a stdlib circuit by name, respecting the detected language version.
@@ -191,7 +218,12 @@ pub fn find_stdlib_circuit_for(
     language: Option<LanguageVersion>,
 ) -> Option<&'static StdlibCircuit> {
     let circ = find_stdlib_circuit(name)?;
-    is_available(circ.min_language_version, language).then_some(circ)
+    is_available_range(
+        circ.min_language_version,
+        circ.max_language_version,
+        language,
+    )
+    .then_some(circ)
 }
 
 /// Return all stdlib struct types.
@@ -208,7 +240,7 @@ pub fn all_stdlib_circuits() -> &'static [StdlibCircuit] {
 pub fn all_stdlib_structs_for(language: Option<LanguageVersion>) -> Vec<&'static StdlibStruct> {
     all_stdlib_structs()
         .iter()
-        .filter(|s| is_available(s.min_language_version, language))
+        .filter(|s| is_available_range(s.min_language_version, s.max_language_version, language))
         .collect()
 }
 
@@ -216,7 +248,7 @@ pub fn all_stdlib_structs_for(language: Option<LanguageVersion>) -> Vec<&'static
 pub fn all_stdlib_circuits_for(language: Option<LanguageVersion>) -> Vec<&'static StdlibCircuit> {
     all_stdlib_circuits()
         .iter()
-        .filter(|c| is_available(c.min_language_version, language))
+        .filter(|c| is_available_range(c.min_language_version, c.max_language_version, language))
         .collect()
 }
 
@@ -422,8 +454,18 @@ mod tests {
     fn test_all_structs_have_fields() {
         for st in all_stdlib_structs() {
             assert!(!st.name.is_empty(), "Struct name must not be empty");
-            // JubjubPoint is an opaque `new type` alias with no fields.
-            if st.name != "JubjubPoint" {
+            // Opaque/native types and type aliases have no public fields.
+            if !matches!(
+                st.name,
+                "JubjubPoint"
+                    | "PublicAddress"
+                    | "Secp256r1Base"
+                    | "Secp256r1Scalar"
+                    | "Secp256r1Point"
+                    | "Curve25519Base"
+                    | "Curve25519Scalar"
+                    | "Curve25519Point"
+            ) {
                 assert!(
                     !st.fields.is_empty(),
                     "Struct {} must have at least one field",
@@ -573,19 +615,71 @@ mod tests {
     fn test_is_available_gating_logic() {
         let detected = Some(LanguageVersion::new(0, 23, 0));
 
-        // Empty minimum -> always available.
-        assert!(is_available("", detected));
-        assert!(is_available("", None));
-        // Unparseable minimum -> err toward showing.
-        assert!(is_available("not-a-version", detected));
-        // At or below the detected version -> available.
-        assert!(is_available("0.23.0", detected));
-        assert!(is_available("0.22.99", detected));
-        // Above the detected version -> hidden.
-        assert!(!is_available("0.23.1", detected));
-        assert!(!is_available("0.23.103", detected));
+        // Empty bounds -> always available.
+        assert!(is_available_range("", "", detected));
+        assert!(is_available_range("", "", None));
+        // Unparseable bounds -> err toward showing.
+        assert!(is_available_range("not-a-version", "", detected));
+        assert!(is_available_range("", "not-a-version", detected));
+        // At or above the minimum -> available.
+        assert!(is_available_range("0.23.0", "", detected));
+        assert!(is_available_range("0.22.99", "", detected));
+        // Above the minimum -> hidden.
+        assert!(!is_available_range("0.23.1", "", detected));
+        assert!(!is_available_range("0.23.103", "", detected));
+        // Maximum is exclusive: a symbol removed in 0.24.0 is available on
+        // 0.23.0 and hidden on 0.24.0 and newer.
+        assert!(is_available_range("", "0.24.0", detected));
+        assert!(!is_available_range("", "0.23.0", detected));
+        assert!(is_available_range("0.23.0", "0.24.0", detected));
         // Unknown detected version (no compiler) -> gating disabled.
-        assert!(is_available("0.23.103", None));
+        assert!(is_available_range("0.23.103", "", None));
+        assert!(is_available_range("", "0.23.0", None));
+    }
+
+    #[test]
+    fn test_version_gating_new_symbols() {
+        let v230 = Some(LanguageVersion::new(0, 23, 0));
+        let v26105 = Some(LanguageVersion::new(0, 26, 105));
+        let v26106 = Some(LanguageVersion::new(0, 26, 106));
+        let v270 = Some(LanguageVersion::new(0, 27, 0));
+
+        // jubjubSchnorrVerify landed at language 0.23.104.
+        assert!(find_stdlib_circuit_for("jubjubSchnorrVerify", v230).is_none());
+        assert!(find_stdlib_struct_for("JubjubSchnorrSignature", v230).is_none());
+        assert!(find_stdlib_circuit_for("jubjubSchnorrVerify", v26105).is_some());
+
+        // PublicAddress / kernel.caller landed at language 0.26.105.
+        assert!(
+            find_stdlib_struct_for("PublicAddress", Some(LanguageVersion::new(0, 26, 104)))
+                .is_none()
+        );
+        assert!(find_stdlib_struct_for("PublicAddress", v26105).is_some());
+
+        // sha512 landed at language 0.26.103; Curve25519 at 0.26.102.
+        assert!(
+            find_stdlib_circuit_for("sha512", Some(LanguageVersion::new(0, 26, 102))).is_none()
+        );
+        assert!(find_stdlib_circuit_for("sha512", v26105).is_some());
+        assert!(
+            find_stdlib_struct_for("Curve25519Point", Some(LanguageVersion::new(0, 26, 101)))
+                .is_none()
+        );
+        assert!(find_stdlib_struct_for("Curve25519Point", v270).is_some());
+
+        // secp256r1EcdsaVerify / ed25519Verify landed at language 0.26.106.
+        assert!(
+            find_stdlib_circuit_for(
+                "secp256r1EcdsaVerify",
+                Some(LanguageVersion::new(0, 26, 105))
+            )
+            .is_none()
+        );
+        assert!(find_stdlib_circuit_for("secp256r1EcdsaVerify", v26106).is_some());
+        assert!(find_stdlib_circuit_for("ed25519Verify", v26106).is_some());
+
+        // Unknown version (no compiler) shows everything.
+        assert!(find_stdlib_circuit_for("ed25519Verify", None).is_some());
     }
 
     #[test]

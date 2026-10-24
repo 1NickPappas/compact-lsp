@@ -14,7 +14,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use super::stdlib::is_available;
+use super::stdlib::is_available_range;
 
 /// A built-in method available on a Compact type.
 pub struct BuiltinMethod {
@@ -29,6 +29,9 @@ pub struct BuiltinMethod {
     /// Minimum language version required to use this method.
     /// Empty means it is available in every version.
     pub min_language_version: &'static str,
+    /// Exclusive upper bound: the language version in which this method was
+    /// removed. Empty means it is not removed in any supported version.
+    pub max_language_version: &'static str,
 }
 
 // ── TOML deserialization structures ─────────────────────────────────
@@ -56,6 +59,8 @@ struct MethodDef {
     doc: String,
     #[serde(default)]
     min_language_version: String,
+    #[serde(default)]
+    max_language_version: String,
 }
 
 // ── Parsed + converted registry ─────────────────────────────────────
@@ -97,6 +102,7 @@ fn registry() -> &'static ParsedRegistry {
                         snippet: Box::leak(m.snippet.into_boxed_str()),
                         documentation: Box::leak(m.doc.into_boxed_str()),
                         min_language_version: Box::leak(m.min_language_version.into_boxed_str()),
+                        max_language_version: Box::leak(m.max_language_version.into_boxed_str()),
                     })
                     .collect(),
             })
@@ -123,7 +129,7 @@ pub fn methods_for_type_for(
 ) -> Vec<&'static BuiltinMethod> {
     methods_for_type(type_name)
         .iter()
-        .filter(|m| is_available(m.min_language_version, language))
+        .filter(|m| is_available_range(m.min_language_version, m.max_language_version, language))
         .collect()
 }
 
@@ -141,7 +147,12 @@ pub fn find_method_by_name_for(
     language: Option<LanguageVersion>,
 ) -> Option<&'static BuiltinMethod> {
     let method = find_method_by_name(type_name, method_name)?;
-    is_available(method.min_language_version, language).then_some(method)
+    is_available_range(
+        method.min_language_version,
+        method.max_language_version,
+        language,
+    )
+    .then_some(method)
 }
 
 /// Extract the base type name from a potentially parameterized type string.
@@ -418,11 +429,20 @@ mod tests {
     }
 
     #[test]
+    fn test_kernel_caller_gated_at_0_26_105() {
+        let before = Some(LanguageVersion::new(0, 26, 104));
+        let after = Some(LanguageVersion::new(0, 26, 105));
+        assert!(find_method_by_name_for("Kernel", "caller", before).is_none());
+        assert!(find_method_by_name_for("Kernel", "caller", after).is_some());
+    }
+
+    #[test]
     fn test_methods_for_kernel() {
         let methods = methods_for_type("Kernel");
-        assert_eq!(methods.len(), 16);
+        assert_eq!(methods.len(), 17);
         let names: Vec<&str> = methods.iter().map(|m| m.name).collect();
         assert!(names.contains(&"self"));
+        assert!(names.contains(&"caller"));
         assert!(names.contains(&"balance"));
         assert!(names.contains(&"balanceGreaterThan"));
         assert!(names.contains(&"balanceLessThan"));

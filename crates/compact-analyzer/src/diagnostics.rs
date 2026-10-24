@@ -64,13 +64,51 @@ fn devtools_compiler() -> Option<String> {
 pub struct DiagnosticEngine {
     /// Path to the compactc.bin compiler
     compiler_path: Option<String>,
+    /// Extra flags required to enable newer language features on this toolchain.
+    feature_flags: Vec<String>,
 }
 
 impl DiagnosticEngine {
     /// Create a new diagnostic engine, auto-detecting the compiler location.
     pub fn new() -> Self {
         let compiler_path = Self::find_compiler();
-        Self { compiler_path }
+        let feature_flags = Self::detect_feature_flags(&compiler_path);
+        Self {
+            compiler_path,
+            feature_flags,
+        }
+    }
+
+    /// Extra compiler flags to pass for the detected toolchain (e.g.
+    /// `--feature-zkir-v3` on toolchains that make the ZKIR-v3 backend opt-in).
+    pub fn feature_flags(&self) -> &[String] {
+        &self.feature_flags
+    }
+
+    /// Detect feature flags the compiler advertises.
+    ///
+    /// The ZKIR-v3 backend was opt-in in toolchains 0.34.100–0.35.104 and is
+    /// required for the foreign secp256r1/Curve25519 types. It became the
+    /// default in 0.35.105 and the flag was removed (passing it is an error), so
+    /// only pass it when `--help` still advertises it.
+    fn detect_feature_flags(compiler_path: &Option<String>) -> Vec<String> {
+        let Some(path) = compiler_path else {
+            return Vec::new();
+        };
+        let Ok(output) = std::process::Command::new(path).arg("--help").output() else {
+            return Vec::new();
+        };
+        let help = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if help.contains("--feature-zkir-v3") {
+            tracing::info!("Compiler advertises --feature-zkir-v3; enabling it");
+            vec!["--feature-zkir-v3".to_string()]
+        } else {
+            Vec::new()
+        }
     }
 
     /// Try to find the compactc compiler in common locations.
@@ -224,6 +262,7 @@ impl DiagnosticEngine {
         let output = match tokio::process::Command::new(compiler_path)
             .arg("--vscode")
             .arg("--skip-zk") // Skip ZK key generation for faster diagnostics
+            .args(&self.feature_flags)
             .arg(file_path)
             .arg(temp_dir.path())
             .output()
@@ -335,6 +374,7 @@ impl DiagnosticEngine {
         let output = match tokio::process::Command::new(compiler_path)
             .arg("--vscode")
             .arg("--skip-zk")
+            .args(&self.feature_flags)
             .arg(&temp_file_path)
             .arg(temp_output_dir.path())
             .output()
@@ -454,6 +494,7 @@ mod tests {
         let output = std::process::Command::new(compiler)
             .arg("--vscode")
             .arg("--skip-zk")
+            .args(engine.feature_flags())
             .arg(&source_path)
             .arg(dir.path())
             .output()
@@ -567,6 +608,100 @@ export circuit probe(x: Field): Bytes<32> {
             assert!(
                 !rejected,
                 "language {language} should accept keccak256 (not gated):\n{stderr}"
+            );
+        }
+    }
+
+    /// Newer stdlib symbols must be accepted by compilers at or above the
+    /// language version where the registry exposes them. The probe uses the
+    /// detected feature flags (e.g. `--feature-zkir-v3`), which the foreign
+    /// curve types require on toolchains 0.34.100–0.35.104.
+    #[test]
+    fn test_probe_version_gated_new_symbols() {
+        let engine = DiagnosticEngine::new();
+        if !engine.is_available() {
+            eprintln!("skipping probe: no compactc detected");
+            return;
+        }
+        let Some(language) = engine.language_version() else {
+            return;
+        };
+
+        // (symbol, source, first language version that has it)
+        let cases: &[(&str, &str, LanguageVersion)] = &[
+            (
+                "jubjubSchnorrVerify",
+                r#"
+import CompactStandardLibrary;
+
+// Message length 1 is a placeholder; the point is name resolution.
+export circuit probe(msg: Vector<1, Field>, sig: JubjubSchnorrSignature, pk: JubjubPoint): Boolean {
+    return jubjubSchnorrVerify<1>(msg, sig, pk);
+}
+"#,
+                LanguageVersion::new(0, 23, 104),
+            ),
+            (
+                "sha512",
+                r#"
+import CompactStandardLibrary;
+
+export circuit probe(x: Field): Bytes<64> {
+    return sha512<Field>(x);
+}
+"#,
+                LanguageVersion::new(0, 26, 103),
+            ),
+            (
+                "kernel.caller",
+                r#"
+import CompactStandardLibrary;
+
+export circuit probe(): Maybe<PublicAddress> {
+    return kernel.caller();
+}
+"#,
+                LanguageVersion::new(0, 26, 105),
+            ),
+            (
+                "secp256r1EcdsaVerify",
+                r#"
+import CompactStandardLibrary;
+
+export circuit probe(msg: Bytes<32>, sig: Secp256r1EcdsaSignature, pk: Secp256r1Point): Boolean {
+    return secp256r1EcdsaVerify(msg, sig, pk);
+}
+"#,
+                LanguageVersion::new(0, 26, 106),
+            ),
+            (
+                "ed25519Verify",
+                r#"
+import CompactStandardLibrary;
+
+export circuit probe(msg: Bytes<3>, sig: Ed25519Signature, pk: Curve25519Point): Boolean {
+    return ed25519Verify<3>(msg, sig, pk);
+}
+"#,
+                LanguageVersion::new(0, 26, 106),
+            ),
+        ];
+
+        for (symbol, source, min) in cases {
+            if language < *min {
+                continue;
+            }
+            let stderr = match compile_probe(&engine, source) {
+                Some(s) => s,
+                None => return,
+            };
+            assert!(
+                !stderr.contains("parse error"),
+                "probe for {symbol} did not parse on language {language}:\n{stderr}"
+            );
+            assert!(
+                !stderr.contains("unbound identifier"),
+                "language {language} (>= {min}) should accept `{symbol}`:\n{stderr}"
             );
         }
     }

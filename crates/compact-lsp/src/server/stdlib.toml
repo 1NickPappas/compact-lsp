@@ -219,6 +219,122 @@ name = "bytes"
 type_str = "Bytes<32>"
 doc = "The raw 32-byte user address."
 
+# ── PublicAddress (language 0.26.105) ────────────────────────────────
+
+[[structs]]
+name = "PublicAddress"
+type_params = ""
+min_language_version = "0.26.105"
+description = "Address of a caller: a contract address (left) or a user address (right). Alias for Either<ContractAddress, UserAddress>, returned inside Maybe by kernel.caller()."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+# ── JubjubSchnorrSignature (language 0.23.104) ───────────────────────
+
+[[structs]]
+name = "JubjubSchnorrSignature"
+type_params = ""
+min_language_version = "0.23.104"
+description = "Schnorr signature over the Jubjub curve, verified by jubjubSchnorrVerify."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[structs.fields]]
+name = "announcement"
+type_str = "JubjubPoint"
+doc = "The signature's public announcement point."
+
+[[structs.fields]]
+name = "response"
+type_str = "Field"
+doc = "The signature response scalar."
+
+# ── Secp256r1 / Curve25519 foreign types ─────────────────────────────
+# Native opaque field and point types. Points support the arithmetic
+# operators plus ecAdd / ecMul / ecMulGenerator and the *PointX/*PointY
+# accessors.
+
+[[structs]]
+name = "Secp256r1Base"
+type_params = ""
+min_language_version = "0.26.100"
+description = "Base field element of the secp256r1 (NIST P-256) curve."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+[[structs]]
+name = "Secp256r1Scalar"
+type_params = ""
+min_language_version = "0.26.100"
+description = "Scalar field element of the secp256r1 (NIST P-256) curve."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+[[structs]]
+name = "Secp256r1Point"
+type_params = ""
+min_language_version = "0.26.100"
+description = "Point on the secp256r1 (NIST P-256) curve."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+[[structs]]
+name = "Curve25519Base"
+type_params = ""
+min_language_version = "0.26.102"
+description = "Base field element of the Curve25519 curve."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+[[structs]]
+name = "Curve25519Scalar"
+type_params = ""
+min_language_version = "0.26.102"
+description = "Scalar field element of the Curve25519 curve."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+[[structs]]
+name = "Curve25519Point"
+type_params = ""
+min_language_version = "0.26.102"
+description = "Point on the Curve25519 curve."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+fields = []
+
+[[structs]]
+name = "Secp256r1EcdsaSignature"
+type_params = ""
+min_language_version = "0.26.106"
+description = "ECDSA signature over secp256r1, verified by secp256r1EcdsaVerify."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[structs.fields]]
+name = "r"
+type_str = "Secp256r1Scalar"
+doc = "The signature r component."
+
+[[structs.fields]]
+name = "s"
+type_str = "Secp256r1Scalar"
+doc = "The signature s component."
+
+[[structs]]
+name = "Ed25519Signature"
+type_params = ""
+min_language_version = "0.26.106"
+description = "Ed25519 signature, verified by ed25519Verify."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[structs.fields]]
+name = "r"
+type_str = "Curve25519Point"
+doc = "The signature R point."
+
+[[structs.fields]]
+name = "s"
+type_str = "Curve25519Scalar"
+doc = "The signature s scalar."
+
 # ═══════════════════════════════════════════════════════════════════════
 # Circuit Functions
 # ═══════════════════════════════════════════════════════════════════════
@@ -578,4 +694,78 @@ type_params = ""
 signature = "blockTimeLte(time: Uint<64>): Boolean"
 snippet = "blockTimeLte(${1:time})"
 doc = "Check if the current block time is less than or equal to the given value."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+# ── Schnorr / foreign-curve verification (language 0.26+) ───────────
+
+[[circuits]]
+name = "jubjubSchnorrVerify"
+type_params = "<#N>"
+min_language_version = "0.23.104"
+signature = "jubjubSchnorrVerify<#N>(msg: Vector<N, Field>, signature: JubjubSchnorrSignature, pk: JubjubPoint): Boolean"
+snippet = "jubjubSchnorrVerify(${1:msg}, ${2:signature}, ${3:pk})"
+doc = "Verify a Schnorr signature over the Jubjub curve. Asserts that the public key is not the identity."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "sha512"
+type_params = "<T>"
+min_language_version = "0.26.103"
+signature = "sha512<T>(value: T): Bytes<64>"
+snippet = "sha512(${1:value})"
+doc = "SHA-512 hash function, returning a 64-byte digest."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "secp256r1EcdsaVerify"
+type_params = ""
+min_language_version = "0.26.106"
+signature = "secp256r1EcdsaVerify(msgHash: Bytes<32>, sig: Secp256r1EcdsaSignature, pk: Secp256r1Point): Boolean"
+snippet = "secp256r1EcdsaVerify(${1:msgHash}, ${2:sig}, ${3:pk})"
+doc = "Verify an ECDSA signature over the secp256r1 (NIST P-256) curve. Asserts that the public key is not the identity."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "ed25519Verify"
+type_params = "<#n>"
+min_language_version = "0.26.106"
+signature = "ed25519Verify<#n>(msg: Bytes<n>, sig: Ed25519Signature, pk: Curve25519Point): Boolean"
+snippet = "ed25519Verify(${1:msg}, ${2:sig}, ${3:pk})"
+doc = "Verify an Ed25519 signature (RFC 8032) over an n-byte message. Asserts that the public key is not the identity."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "secp256r1PointX"
+type_params = ""
+min_language_version = "0.26.100"
+signature = "secp256r1PointX(pt: Secp256r1Point): Secp256r1Base"
+snippet = "secp256r1PointX(${1:pt})"
+doc = "The x-coordinate of a secp256r1 point."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "secp256r1PointY"
+type_params = ""
+min_language_version = "0.26.100"
+signature = "secp256r1PointY(pt: Secp256r1Point): Secp256r1Base"
+snippet = "secp256r1PointY(${1:pt})"
+doc = "The y-coordinate of a secp256r1 point."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "curve25519PointX"
+type_params = ""
+min_language_version = "0.26.102"
+signature = "curve25519PointX(pt: Curve25519Point): Curve25519Base"
+snippet = "curve25519PointX(${1:pt})"
+doc = "The x-coordinate of a Curve25519 point."
+doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"
+
+[[circuits]]
+name = "curve25519PointY"
+type_params = ""
+min_language_version = "0.26.102"
+signature = "curve25519PointY(pt: Curve25519Point): Curve25519Base"
+snippet = "curve25519PointY(${1:pt})"
+doc = "The y-coordinate of a Curve25519 point."
 doc_url = "https://docs.midnight.network/develop/reference/compact/compact-std-library/exports"

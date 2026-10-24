@@ -365,6 +365,13 @@ snippet = "self()"
 doc = "Return the current contract's address."
 
 [[types.methods]]
+name = "caller"
+min_language_version = "0.26.105"
+signature = "caller(): Maybe<PublicAddress>"
+snippet = "caller()"
+doc = "Return the caller of this circuit invocation as Maybe<PublicAddress>: left(contract), right(user), or none when unknown. Requires language 0.26.105+."
+
+[[types.methods]]
 name = "balance"
 signature = "balance(token_type: Either<Bytes<32>, Bytes<32>>): Uint<128>"
 snippet = "balance(${1:token_type})"
