@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-24
+
 ### Added
 - README: crates.io/downloads badges and an **Install** section documenting
   `cargo install compact-lsp`, prebuilt binaries, and the two published crates.
