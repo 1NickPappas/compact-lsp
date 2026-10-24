@@ -48,6 +48,7 @@ pub enum CompletionSymbolKind {
     Enum,
     Variable,
     Module,
+    Contract,
 }
 
 /// Location of a symbol in the source code.
@@ -155,4 +156,30 @@ pub struct ReferenceLocation {
     pub range: Range,
     /// True if this is the definition site, false if it's a usage.
     pub is_definition: bool,
+}
+
+/// A circuit declared by a contract type (`ecdecl`).
+#[derive(Debug, Clone)]
+pub struct ContractCircuit {
+    /// Circuit name.
+    pub name: String,
+    /// Parameter + return detail, e.g. `(to: Address): Boolean`.
+    pub detail: String,
+    /// Full signature, e.g. `circuit transfer(to: Address): Boolean`.
+    pub signature: String,
+    /// Documentation from a preceding doc comment, if any.
+    pub documentation: Option<String>,
+    /// Range of the whole `ecdecl_circuit`.
+    pub location: SymbolLocation,
+}
+
+/// A contract type: `contract Name { circuit …; }`.
+#[derive(Debug, Clone)]
+pub struct ContractTypeInfo {
+    /// Contract type name.
+    pub name: String,
+    /// Circuits the contract type declares.
+    pub circuits: Vec<ContractCircuit>,
+    /// Range of the whole `ecdecl`.
+    pub location: SymbolLocation,
 }

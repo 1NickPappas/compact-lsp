@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cross-contract-call intelligence** (Compact 0.26+):
+  - contract types (`contract Token { … }`) are indexed for completion and workspace symbols;
+  - `contract implements Token;` offers contract types and resolves hover/go-to-definition;
+  - a contract reference (`ref: Token`) gets member completion, hover, go-to-definition, and
+    signature help for `ref.circuit(...)`, including contract types imported from other files.
+- Member accesses are emitted as method/property semantic tokens.
+- An end-to-end LSP integration test (`crates/compact-lsp/tests/ccc_integration.rs`) covering
+  member completion, hover, signature help, definition, and `contract implements` completion.
 - **Compact 0.34/0.35 support** (language 0.26/0.27): registry entries for `PublicAddress`,
   `kernel.caller()`, `sha512`, `jubjubSchnorrVerify`, `secp256r1EcdsaVerify`, `ed25519Verify`,
   the secp256r1/Curve25519 field and point types, and their signature structs. All are

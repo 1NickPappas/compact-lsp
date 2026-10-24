@@ -222,6 +222,22 @@ pub fn parse_params_from_detail(detail: &str) -> Vec<String> {
 /// Unlike `get_dot_access_variable` (which requires cursor immediately after the dot),
 /// this handles partial identifiers after the dot (e.g., `round.inc|` returns `Some("round")`).
 /// Works for both `round.|` and `round.inc|` positions.
+/// Whether the cursor is in a `contract implements <Type>` declaration.
+///
+/// Used to offer contract types as completions. This is intentionally
+/// text-based: while the type name is being typed the tree-sitter parse may be
+/// incomplete, so the AST is not reliable here.
+pub fn is_after_contract_implements(content: &str, line: u32, character: u32) -> bool {
+    let Some(line_content) = content.lines().nth(line as usize) else {
+        return false;
+    };
+    let before: String = line_content.chars().take(character as usize).collect();
+    if before.contains(';') {
+        return false;
+    }
+    before.trim_start().starts_with("contract implements")
+}
+
 pub fn detect_dot_context(content: &str, line: u32, character: u32) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
     let line_content = lines.get(line as usize)?;

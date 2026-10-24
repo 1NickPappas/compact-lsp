@@ -66,7 +66,7 @@ Remaining:
 - ✅ **Probe-compile drift check** — the `compiler-probe` CI job installs toolchain 0.31.1 and runs the `diagnostics.rs` probe tests (stable-symbol coverage + keccak256 gate consistency). They self-skip when no compiler is present.
 - **[Add] Outdated-dependency watcher** — a scheduled workflow (like `upstream-watch`) that files an issue when a direct Cargo dependency is behind the latest stable release (source: `cargo outdated` or the crates.io API).
 - ✅ **Compact 0.34/0.35 (language 0.26/0.27) registry support** — grammar bumped to `tree-sitter-compact` 0.3.0; added `PublicAddress`, `kernel.caller()`, `sha512`, `jubjubSchnorrVerify`, `secp256r1EcdsaVerify`, `ed25519Verify`, the secp256r1/Curve25519 types, and `contract implements`/`emit` handling; added `max_language_version` gating; CI probes 0.31.1/0.34.0/0.35.0.
-- **[TODO] Cross-contract-call intelligence (Phase 3)** — resolve `contract implements C;`, and give contract references (`ref.circuit(...)`) completion/hover/go-to-definition/signature help across files.
+- ✅ **Cross-contract-call intelligence (Phase 3)** — `contract implements C;` resolves to the contract type; contract references (`ref.circuit(...)`) get member completion, hover, go-to-definition, and signature help (same-file and imported/workspace); member accesses are semantic tokens. Covered by an end-to-end LSP integration test.
 
 ---
 

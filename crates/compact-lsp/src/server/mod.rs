@@ -23,8 +23,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use compact_analyzer::{
-    CompletionSymbol, CompletionSymbolKind, DiagnosticEngine, FormatterEngine, LanguageVersion,
-    ParserEngine, SymbolLocation,
+    CompletionSymbol, CompletionSymbolKind, ContractTypeInfo, DiagnosticEngine, FormatterEngine,
+    LanguageVersion, ParserEngine, SymbolLocation,
 };
 use dashmap::DashMap;
 use lsp_types::*;
@@ -84,6 +84,7 @@ fn completion_kind_to_symbol_kind(kind: CompletionSymbolKind) -> SymbolKind {
         CompletionSymbolKind::Enum => SymbolKind::ENUM,
         CompletionSymbolKind::Variable => SymbolKind::VARIABLE,
         CompletionSymbolKind::Module => SymbolKind::MODULE,
+        CompletionSymbolKind::Contract => SymbolKind::CLASS,
     }
 }
 
@@ -560,6 +561,61 @@ impl CompactLanguageServer {
         None
     }
 
+    /// Resolve a contract type by name, looking first in the current file and
+    /// then in imported/workspace files. Returns the defining URI and its info.
+    fn resolve_contract_type(
+        &self,
+        current_uri: &str,
+        type_name: &str,
+    ) -> Option<(String, ContractTypeInfo)> {
+        // 1. The current file.
+        if let Some(doc) = self.documents.get(current_uri) {
+            let content = doc.content.to_string();
+            if let Some(info) = self.parse_contract_type(&content, type_name) {
+                return Some((current_uri.to_string(), info));
+            }
+        }
+
+        // 2. An imported symbol (handles `prefix` imports).
+        if let Some((file_uri, symbol)) = self.find_imported_symbol(current_uri, type_name)
+            && symbol.kind == CompletionSymbolKind::Contract
+        {
+            let content = self.source_cache.get(&file_uri).map(|c| c.clone());
+            if let Some(content) = content
+                && let Some(info) = self.parse_contract_type(&content, &symbol.name)
+            {
+                return Some((file_uri, info));
+            }
+        }
+
+        // 3. Any workspace file that declares a contract type with this name.
+        let candidates: Vec<String> = self
+            .symbol_cache
+            .iter()
+            .filter(|entry| {
+                entry
+                    .value()
+                    .iter()
+                    .any(|s| s.kind == CompletionSymbolKind::Contract && s.name == type_name)
+            })
+            .map(|entry| entry.key().clone())
+            .collect();
+        for file_uri in candidates {
+            let content = self.source_cache.get(&file_uri).map(|c| c.clone());
+            if let Some(content) = content
+                && let Some(info) = self.parse_contract_type(&content, type_name)
+            {
+                return Some((file_uri, info));
+            }
+        }
+        None
+    }
+
+    fn parse_contract_type(&self, content: &str, name: &str) -> Option<ContractTypeInfo> {
+        let mut parser = self.parser_engine.lock().unwrap();
+        parser.contract_type(content, name)
+    }
+
     /// Build a SignatureHelp response from SignatureInfo.
     fn build_signature_help_response(
         &self,
@@ -877,6 +933,42 @@ impl LanguageServer for CompactLanguageServer {
         if let Some(doc) = self.documents.get(&uri) {
             let content = doc.content.to_string();
 
+            // `contract implements <Type>;` — offer contract types.
+            if utils::is_after_contract_implements(&content, position.line, position.character) {
+                let mut names = std::collections::BTreeSet::new();
+                {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    for sym in parser
+                        .get_completion_symbols(&content)
+                        .into_iter()
+                        .filter(|s| s.kind == CompletionSymbolKind::Contract)
+                    {
+                        names.insert(sym.name);
+                    }
+                }
+                for entry in self.symbol_cache.iter() {
+                    for sym in entry
+                        .value()
+                        .iter()
+                        .filter(|s| s.kind == CompletionSymbolKind::Contract)
+                    {
+                        names.insert(sym.name.clone());
+                    }
+                }
+                let items: Vec<CompletionItem> = names
+                    .into_iter()
+                    .map(|name| CompletionItem {
+                        label: name,
+                        kind: Some(CompletionItemKind::INTERFACE),
+                        detail: Some("contract type".to_string()),
+                        ..Default::default()
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
+
             // Try trigger-character-based detection first, then text-based fallback
             let var_name = if is_dot_trigger {
                 tracing::debug!("Dot completion: trigger character detected");
@@ -902,6 +994,32 @@ impl LanguageServer for CompactLanguageServer {
                 });
                 if let Some(type_str) = var_type {
                     let base_type = builtins::extract_base_type(&type_str);
+
+                    // Contract type? Offer its declared circuits (cross-contract calls).
+                    if let Some((_file, contract)) = self.resolve_contract_type(&uri, base_type)
+                        && !contract.circuits.is_empty()
+                    {
+                        let items: Vec<CompletionItem> = contract
+                            .circuits
+                            .iter()
+                            .map(|c| CompletionItem {
+                                label: c.name.clone(),
+                                kind: Some(CompletionItemKind::METHOD),
+                                detail: Some(format!("{}{}", contract.name, c.detail)),
+                                documentation: c.documentation.clone().map(|d| {
+                                    Documentation::MarkupContent(MarkupContent {
+                                        kind: MarkupKind::Markdown,
+                                        value: d,
+                                    })
+                                }),
+                                insert_text: Some(format!("{}({})", c.name, "$0")),
+                                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                                ..Default::default()
+                            })
+                            .collect();
+                        return Ok(Some(CompletionResponse::Array(items)));
+                    }
+
                     tracing::debug!("Dot completion: resolved type = {}", base_type);
                     let methods = builtins::methods_for_type_for(base_type, self.language_version);
                     if !methods.is_empty() {
@@ -935,6 +1053,7 @@ impl LanguageServer for CompactLanguageServer {
                 CompletionSymbolKind::Enum => CompletionItemKind::ENUM,
                 CompletionSymbolKind::Variable => CompletionItemKind::VARIABLE,
                 CompletionSymbolKind::Module => CompletionItemKind::MODULE,
+                CompletionSymbolKind::Contract => CompletionItemKind::INTERFACE,
             }
         }
 
@@ -1551,6 +1670,33 @@ impl LanguageServer for CompactLanguageServer {
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
+                if let Some((_file, contract)) = self.resolve_contract_type(&uri, base_type)
+                    && let Some(circuit) =
+                        contract.circuits.iter().find(|c| c.name == ctx.member_name)
+                {
+                    let signature = circuit
+                        .signature
+                        .strip_prefix("circuit ")
+                        .unwrap_or(&circuit.signature);
+                    let hover_text = format!(
+                        "```compact\n{}.{}\n```\n\nCircuit on contract type `{}`{}",
+                        ctx.base_name,
+                        signature,
+                        contract.name,
+                        circuit
+                            .documentation
+                            .as_deref()
+                            .map(|d| format!("\n\n---\n\n{}", d))
+                            .unwrap_or_default()
+                    );
+                    return Ok(Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: hover_text,
+                        }),
+                        range: Some(ctx.member_range),
+                    }));
+                }
                 if let Some(method) = builtins::find_method_by_name_for(
                     base_type,
                     &ctx.member_name,
@@ -1668,6 +1814,29 @@ impl LanguageServer for CompactLanguageServer {
             });
             if let Some(type_str) = var_type {
                 let base_type = builtins::extract_base_type(&type_str);
+                if let Some((file_uri, contract)) =
+                    self.resolve_contract_type(&uri_string, base_type)
+                    && let Some(circuit) =
+                        contract.circuits.iter().find(|c| c.name == ctx.member_name)
+                {
+                    let target_uri = match Uri::from_str(&file_uri) {
+                        Ok(u) => u,
+                        Err(_) => return Ok(None),
+                    };
+                    return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                        uri: target_uri,
+                        range: Range {
+                            start: Position {
+                                line: circuit.location.start_line,
+                                character: circuit.location.start_char,
+                            },
+                            end: Position {
+                                line: circuit.location.end_line,
+                                character: circuit.location.end_char,
+                            },
+                        },
+                    })));
+                }
                 if let Some(doc_loc) =
                     builtins::get_builtin_method_doc_location(base_type, &ctx.member_name)
                 {
@@ -1806,6 +1975,63 @@ impl LanguageServer for CompactLanguageServer {
 
         if let Some(info) = sig_info {
             return Ok(Some(self.build_signature_help_response(info)));
+        }
+
+        // Cross-contract call: `reference.circuit(...)` where `reference` is a
+        // value of a contract type.
+        let member_call = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.get_enclosing_member_call(&content, position.line, position.character)
+        };
+        if let Some(ctx) = member_call {
+            let var_type = {
+                let mut parser = self.parser_engine.lock().unwrap();
+                parser.get_variable_type(&content, &ctx.base_name)
+            };
+            if let Some(type_str) = var_type {
+                let base_type = builtins::extract_base_type(&type_str);
+                if let Some((_file, contract)) = self.resolve_contract_type(&uri, base_type)
+                    && let Some(circuit) =
+                        contract.circuits.iter().find(|c| c.name == ctx.member_name)
+                {
+                    let active_param = utils::count_commas_before_cursor(
+                        &content,
+                        position.line,
+                        position.character,
+                    );
+                    let params = utils::parse_params_from_detail(&circuit.detail);
+                    let parameters: Vec<ParameterInformation> = params
+                        .iter()
+                        .map(|p| ParameterInformation {
+                            label: ParameterLabel::Simple(p.clone()),
+                            documentation: None,
+                        })
+                        .collect();
+                    let signature = SignatureInformation {
+                        label: format!(
+                            "{}.{}",
+                            contract.name,
+                            circuit
+                                .signature
+                                .strip_prefix("circuit ")
+                                .unwrap_or(&circuit.signature)
+                        ),
+                        documentation: circuit.documentation.clone().map(|d| {
+                            Documentation::MarkupContent(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: d,
+                            })
+                        }),
+                        parameters: Some(parameters),
+                        active_parameter: Some(active_param),
+                    };
+                    return Ok(Some(SignatureHelp {
+                        signatures: vec![signature],
+                        active_signature: Some(0),
+                        active_parameter: Some(active_param),
+                    }));
+                }
+            }
         }
 
         let func_name =
@@ -2158,6 +2384,29 @@ mod tests {
             completion_kind_to_symbol_kind(CompletionSymbolKind::Module),
             SymbolKind::MODULE
         );
+        assert_eq!(
+            completion_kind_to_symbol_kind(CompletionSymbolKind::Contract),
+            SymbolKind::CLASS
+        );
+    }
+
+    #[test]
+    fn test_is_after_contract_implements() {
+        let partial = "contract implements Tok";
+        assert!(utils::is_after_contract_implements(
+            partial,
+            0,
+            partial.len() as u32
+        ));
+
+        let complete = "contract implements Token;";
+        assert!(!utils::is_after_contract_implements(
+            complete,
+            0,
+            complete.len() as u32
+        ));
+
+        assert!(!utils::is_after_contract_implements("circuit f() {", 0, 5));
     }
 
     #[test]

@@ -660,6 +660,27 @@ impl ParserEngine {
                     range: Some(self.node_range(node)),
                 })
             }
+            "ecdecl" => {
+                let info = self.contract_type_info(node, source);
+                let circuits = info
+                    .circuits
+                    .iter()
+                    .map(|c| format!("- `{}`", c.signature))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let circuits_str = if circuits.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\nCircuits:\n{}", circuits)
+                };
+                Some(HoverInfo {
+                    content: format!(
+                        "```compact\ncontract {} {{ ... }}\n```\n\nContract type{}{}",
+                        info.name, circuits_str, doc_suffix
+                    ),
+                    range: Some(self.node_range(node)),
+                })
+            }
             _ => None,
         }
     }
@@ -1154,7 +1175,7 @@ impl ParserEngine {
 
         // Extract any doc comments preceding the definition (for relevant node types)
         let doc_comment = match kind {
-            "cdefn" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" => self
+            "cdefn" | "wdecl" | "struct" | "enumdef" | "ldecl" | "mdefn" | "ecdecl" => self
                 .extract_doc_comment(node, source)
                 .map(|doc| format!("\n\n---\n\n{}", doc))
                 .unwrap_or_default(),
@@ -1197,6 +1218,30 @@ impl ParserEngine {
                         name,
                         kind: CompletionSymbolKind::Function,
                         detail: Some(detail),
+                        location: Some(location),
+                        documentation: Some(doc),
+                    });
+                }
+            }
+            // Contract types (contract Name { circuit … })
+            "ecdecl" => {
+                if let Some(name) = self.get_field_text(node, "name", source) {
+                    let info = self.contract_type_info(node, source);
+                    let location = self.node_to_symbol_location(node);
+                    let circuits = info
+                        .circuits
+                        .iter()
+                        .map(|c| format!("- `{}`", c.signature))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let doc = format!(
+                        "Contract type\n\n```compact\ncontract {}\n```\n\nCircuits:\n{}{}",
+                        name, circuits, doc_comment
+                    );
+                    symbols.push(CompletionSymbol {
+                        name,
+                        kind: CompletionSymbolKind::Contract,
+                        detail: Some("contract".to_string()),
                         location: Some(location),
                         documentation: Some(doc),
                     });
@@ -1539,6 +1584,22 @@ impl ParserEngine {
                 }
             }
 
+            // Member access: `ref.transfer(...)` (method) or `info.value` (field).
+            "member_access_expr" => {
+                if let Some(member) = node.child_by_field_name("member") {
+                    let is_call = node.child_by_field_name("arguments").is_some();
+                    tokens.push(SemanticToken {
+                        range: self.node_range(member),
+                        token_type: if is_call {
+                            SemanticTokenType::Function
+                        } else {
+                            SemanticTokenType::Property
+                        },
+                        modifiers: vec![],
+                    });
+                }
+            }
+
             // New language keywords from grammar 0.3.0. The grammar models
             // these as anonymous literal children, so emit explicit keyword
             // tokens for them.
@@ -1857,13 +1918,28 @@ impl ParserEngine {
         self.find_variable_type(tree.root_node(), source_bytes, variable_name)
     }
 
-    /// Recursively search AST for a ledger declaration matching the variable name.
+    /// Recursively search the AST for a declaration of `variable_name` and
+    /// return its type annotation.
+    ///
+    /// Handles ledger fields (`ldecl`), circuit/witness parameters (`parg`), and
+    /// typed const bindings (`const x: T = ...`). A contract reference is
+    /// typically a `parg` or an `ldecl`, so this powers `ref.circuit(...)`
+    /// member completion.
     fn find_variable_type(&self, node: Node, source: &[u8], variable_name: &str) -> Option<String> {
-        if node.kind() == "ldecl"
-            && let Some(name) = self.get_field_text(node, "name", source)
-            && name == variable_name
-        {
-            return self.get_field_text(node, "type", source);
+        match node.kind() {
+            "ldecl" => {
+                if self.get_field_text(node, "name", source).as_deref() == Some(variable_name) {
+                    return self.get_field_text(node, "type", source);
+                }
+            }
+            "parg" | "const_binding" | "cbinding" => {
+                if let Some(pattern) = node.child_by_field_name("pattern")
+                    && self.pattern_binds(pattern, source, variable_name)
+                {
+                    return self.get_field_text(node, "type", source);
+                }
+            }
+            _ => {}
         }
 
         let mut cursor = node.walk();
@@ -1874,6 +1950,113 @@ impl ParserEngine {
         }
 
         None
+    }
+
+    /// Whether a `pattern` node binds `name` (simple or destructuring).
+    fn pattern_binds(&self, pattern: Node, source: &[u8], name: &str) -> bool {
+        if let Some(id) = pattern.child_by_field_name("id") {
+            return self.node_text(id, source) == name;
+        }
+        let mut cursor = pattern.walk();
+        pattern
+            .children(&mut cursor)
+            .any(|child| self.pattern_binds(child, source, name))
+    }
+
+    /// Find a contract type (`contract Name { … }`) by name and return its
+    /// declared circuits. Used for cross-contract-call intelligence.
+    pub fn contract_type(&mut self, source: &str, name: &str) -> Option<ContractTypeInfo> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let ecdecl = self.find_ecdecl(root, source.as_bytes(), name)?;
+        Some(self.contract_type_info(ecdecl, source.as_bytes()))
+    }
+
+    /// Recursively find an `ecdecl` with the given name.
+    fn find_ecdecl<'a>(&self, node: Node<'a>, source: &[u8], name: &str) -> Option<Node<'a>> {
+        if node.kind() == "ecdecl"
+            && self.get_field_text(node, "name", source).as_deref() == Some(name)
+        {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_ecdecl(child, source, name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Build the info for an `ecdecl` node, including its declared circuits.
+    fn contract_type_info(&self, node: Node, source: &[u8]) -> ContractTypeInfo {
+        let name = self
+            .get_field_text(node, "name", source)
+            .unwrap_or_default();
+        let mut circuits = Vec::new();
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() != "ecdecl_circuit" {
+                continue;
+            }
+            let Some(circuit_name) = self.get_field_text(child, "id", source) else {
+                continue;
+            };
+            let params = self.extract_params(child, source);
+            let return_type = self
+                .get_field_text(child, "type", source)
+                .unwrap_or_default();
+            let detail = format!("({}): {}", params, return_type);
+            let signature = format!("circuit {}{}", circuit_name, detail);
+            let documentation = self
+                .extract_doc_comment(child, source)
+                .map(|doc| format!("---\n\n{}", doc));
+            circuits.push(ContractCircuit {
+                name: circuit_name,
+                detail,
+                signature,
+                documentation,
+                location: self.node_to_symbol_location(child),
+            });
+        }
+        ContractTypeInfo {
+            name,
+            circuits,
+            location: self.node_to_symbol_location(node),
+        }
+    }
+
+    /// Like [`Self::get_member_access_context`], but works anywhere inside the
+    /// call's argument list. Used by signature help for `reference.circuit(...)`.
+    pub fn get_enclosing_member_call(
+        &mut self,
+        source: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<MemberAccessContext> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let point = tree_sitter::Point {
+            row: line as usize,
+            column: character as usize,
+        };
+        let mut node = root.descendant_for_point_range(point, point)?;
+        loop {
+            if node.kind() == "member_access_expr"
+                && node.child_by_field_name("arguments").is_some()
+            {
+                let member_node = node.child_by_field_name("member")?;
+                let base_node = node.child_by_field_name("base")?;
+                let base_name = self.extract_base_identifier(base_node, source.as_bytes())?;
+                let member_name = self.node_text(member_node, source.as_bytes());
+                return Some(MemberAccessContext {
+                    base_name,
+                    member_name,
+                    member_range: self.node_range(member_node),
+                });
+            }
+            node = node.parent()?;
+        }
     }
 }
 
@@ -2456,6 +2639,144 @@ circuit broken3 {
     }
 
     #[test]
+    fn test_contract_type_extraction() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+        let info = parser
+            .contract_type(source, "Token")
+            .expect("contract type");
+        assert_eq!(info.name, "Token");
+        assert_eq!(info.circuits.len(), 2);
+        let transfer = &info.circuits[0];
+        assert_eq!(transfer.name, "transfer");
+        assert_eq!(transfer.detail, "(to: Address, amount: Uint<64>): Boolean");
+        assert_eq!(
+            transfer.signature,
+            "circuit transfer(to: Address, amount: Uint<64>): Boolean"
+        );
+        assert!(parser.contract_type(source, "Missing").is_none());
+    }
+
+    #[test]
+    fn test_variable_type_resolves_contract_references() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+circuit useParam(ref: Token): Boolean {
+    return ref.transfer(0);
+}
+
+circuit useConst(): Boolean {
+    const ref: Token = default<Token>;
+    return ref.transfer(0);
+}
+
+ledger stored: Token;
+
+circuit useLedger(): Boolean {
+    return stored.transfer(0);
+}
+"#;
+        assert_eq!(
+            parser.get_variable_type(source, "ref").as_deref(),
+            Some("Token")
+        );
+        assert_eq!(
+            parser.get_variable_type(source, "stored").as_deref(),
+            Some("Token")
+        );
+        assert!(parser.get_variable_type(source, "nope").is_none());
+    }
+
+    #[test]
+    fn test_enclosing_member_call() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+}
+
+circuit useParam(ref: Token): Boolean {
+    return ref.transfer(0, 1);
+}
+"#;
+        let line = 6;
+        let line_text = source.lines().nth(line as usize).unwrap();
+        let char = line_text.find(',').unwrap() as u32 + 1;
+        let ctx = parser
+            .get_enclosing_member_call(source, line, char)
+            .expect("enclosing member call");
+        assert_eq!(ctx.base_name, "ref");
+        assert_eq!(ctx.member_name, "transfer");
+    }
+
+    #[test]
+    fn test_ecdecl_hover() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+"#;
+        let info = parser
+            .hover_info(source, 1, 9)
+            .expect("hover for contract type");
+        assert!(info.content.contains("Contract type"));
+        assert!(info.content.contains("Token"));
+        assert!(
+            info.content
+                .contains("circuit transfer(to: Address): Boolean")
+        );
+    }
+
+    #[test]
+    fn test_contract_type_in_completion_symbols() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+"#;
+        let symbols = parser.get_completion_symbols(source);
+        let contract = symbols
+            .iter()
+            .find(|s| s.name == "Token")
+            .expect("contract type in completion symbols");
+        assert_eq!(contract.kind, CompletionSymbolKind::Contract);
+        assert!(
+            contract
+                .documentation
+                .as_deref()
+                .unwrap_or("")
+                .contains("transfer")
+        );
+    }
+
+    #[test]
+    fn test_goto_definition_contract_implements() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+contract Token {
+    circuit transfer(to: Address): Boolean;
+}
+
+contract implements Token;
+"#;
+        let loc = parser
+            .goto_definition(source, 5, 21)
+            .expect("definition of the implemented contract type");
+        assert_eq!(loc.selection_range.start.line, 1);
+    }
+
+    #[test]
     fn test_semantic_tokens_basic() {
         let mut parser = ParserEngine::new();
         let source = r#"
@@ -2555,6 +2876,23 @@ circuit f(): [] {
         assert!(
             keywords.iter().any(|t| t.range.start.line == 8),
             "expected the `emit` keyword token"
+        );
+    }
+
+    #[test]
+    fn test_semantic_tokens_member_access() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit f(ref: Field): Field {
+    return ref.value;
+}
+"#;
+        let tokens = parser.get_semantic_tokens(source);
+        assert!(
+            tokens
+                .iter()
+                .any(|t| t.token_type == SemanticTokenType::Property && t.range.start.line == 2),
+            "member field access should be a Property token"
         );
     }
 

@@ -34,6 +34,7 @@ Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35
 | **Folding Ranges** | Code folding for blocks and functions |
 | **Cross-file Errors** | Errors propagate to dependent files on save |
 | **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
+| **Cross-contract calls** | Completion, hover, go-to-definition, and signature help for `ref.circuit(...)`; `contract implements` type completion |
 
 ### Cross-Project Support
 
@@ -43,6 +44,23 @@ Works with Compact's import system:
 import "./Utils" prefix Utils_;
 
 Utils_add(5, 5);  // Completion, hover, go-to-def, find refs, rename, signature help all work
+```
+
+### Cross-Contract Calls
+
+On ledger-9 toolchains, a contract reference (`ref: Token`) supports the full editor feature set
+on the circuits declared by its contract type:
+
+```compact
+contract Token {
+  circuit transfer(to: Address, amount: Uint<64>): Boolean;
+}
+
+contract implements Token;          // completion offers `Token`
+
+circuit useIt(ref: Token): Boolean {
+  return ref.transfer(to, amount);  // completion, hover, go-to-def, signature help
+}
 ```
 
 ### Missing Things
