@@ -181,6 +181,15 @@ pub struct ReferenceLocation {
     pub is_definition: bool,
 }
 
+/// Whether a type member is a struct field or an enum variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeMemberKind {
+    /// A field declared in a `struct`.
+    Field,
+    /// A variant declared in an `enum`.
+    Variant,
+}
+
 /// A callable's declared signature (circuit or witness), used to instantiate
 /// generic parameters at a call site.
 #[derive(Debug, Clone)]

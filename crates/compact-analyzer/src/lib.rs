@@ -20,6 +20,6 @@ pub use parser::{
     CallableSignature, CompletionSymbol, CompletionSymbolKind, ContractCircuit, ContractTypeInfo,
     DefinitionLocation, HoverInfo, ImportInfo, MemberAccessContext, MemberBase, ParameterInfo,
     ParserEngine, ReferenceLocation, SemanticToken, SemanticTokenModifier, SemanticTokenType,
-    SignatureInfo, SymbolLocation, SyntaxError, is_builtin_type,
+    SignatureInfo, SymbolLocation, SyntaxError, TypeMemberKind, is_builtin_type,
 };
 pub use version::LanguageVersion;

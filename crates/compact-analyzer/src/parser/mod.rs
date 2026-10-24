@@ -2022,6 +2022,16 @@ impl ParserEngine {
             .is_some()
     }
 
+    /// Whether an `enum` named `name` is declared in this file.
+    pub fn enum_exists(&mut self, source: &str, name: &str) -> bool {
+        let Some(tree) = self.parse(source) else {
+            return false;
+        };
+        let root = tree.root_node();
+        let resolved = self.resolve_type_name(root, source.as_bytes(), name);
+        self.find_enum(root, source.as_bytes(), &resolved).is_some()
+    }
+
     /// Declared type of a `struct` field (`struct S { field: T }`), following
     /// same-file aliases for the struct name.
     pub fn get_struct_field_type(
@@ -2057,6 +2067,92 @@ impl ParserEngine {
         self.get_field_text(struct_node, "gparams", source_bytes)
     }
 
+    /// If the position is on a struct-field declaration (`arg` inside a
+    /// `struct`) or an enum-variant declaration (`id` inside an `enumdef`),
+    /// return the owning type name, the member name, and the kind.
+    #[allow(clippy::type_complexity)]
+    pub fn type_member_at_position(
+        &mut self,
+        source: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, String, TypeMemberKind)> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let bytes = source.as_bytes();
+        let point = tree_sitter::Point {
+            row: line as usize,
+            column: character as usize,
+        };
+        let node = root.descendant_for_point_range(point, point)?;
+        if node.kind() != "id" {
+            return None;
+        }
+        let parent = node.parent()?;
+        // Struct field: id → arg → struct.
+        if parent.kind() == "arg" {
+            let owner = parent.parent()?;
+            if owner.kind() != "struct" {
+                return None;
+            }
+            let owner_name = self.get_field_text(owner, "name", bytes)?;
+            return Some((
+                owner_name,
+                self.node_text(node, bytes),
+                TypeMemberKind::Field,
+            ));
+        }
+        // Enum variant: id → enumdef.
+        if parent.kind() == "enumdef" {
+            let owner_name = self.get_field_text(parent, "name", bytes)?;
+            return Some((
+                owner_name,
+                self.node_text(node, bytes),
+                TypeMemberKind::Variant,
+            ));
+        }
+        None
+    }
+
+    /// Range of a struct-field or enum-variant declaration's identifier.
+    pub fn find_member_definition_location(
+        &mut self,
+        source: &str,
+        owner_name: &str,
+        member_name: &str,
+        kind: TypeMemberKind,
+    ) -> Option<Range> {
+        let tree = self.parse(source)?;
+        let root = tree.root_node();
+        let bytes = source.as_bytes();
+        let resolved = self.resolve_type_name(root, bytes, owner_name);
+        match kind {
+            TypeMemberKind::Field => {
+                let struct_node = self.find_struct(root, bytes, &resolved)?;
+                let mut cursor = struct_node.walk();
+                for child in struct_node.children(&mut cursor) {
+                    if child.kind() == "arg"
+                        && self.get_field_text(child, "id", bytes).as_deref() == Some(member_name)
+                        && let Some(id) = child.child_by_field_name("id")
+                    {
+                        return Some(self.node_range(id));
+                    }
+                }
+                None
+            }
+            TypeMemberKind::Variant => {
+                let enum_node = self.find_enum(root, bytes, &resolved)?;
+                let mut cursor = enum_node.walk();
+                for child in enum_node.children(&mut cursor) {
+                    if child.kind() == "id" && self.node_text(child, bytes) == member_name {
+                        return Some(self.node_range(child));
+                    }
+                }
+                None
+            }
+        }
+    }
+
     /// Recursively find a `struct` named `name`.
     fn find_struct<'a>(&self, node: Node<'a>, source: &[u8], name: &str) -> Option<Node<'a>> {
         if node.kind() == "struct"
@@ -2067,6 +2163,22 @@ impl ParserEngine {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if let Some(found) = self.find_struct(child, source, name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Recursively find an `enum` named `name`.
+    fn find_enum<'a>(&self, node: Node<'a>, source: &[u8], name: &str) -> Option<Node<'a>> {
+        if node.kind() == "enumdef"
+            && self.get_field_text(node, "name", source).as_deref() == Some(name)
+        {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = self.find_enum(child, source, name) {
                 return Some(found);
             }
         }
@@ -3597,6 +3709,63 @@ struct Plain { n: Uint<64>; }
             Some("<T>")
         );
         assert_eq!(parser.get_struct_type_params(source, "Plain"), None);
+    }
+
+    #[test]
+    fn test_enum_exists() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+enum Phase { day, night }
+struct Wallet { balance: Uint<64>; }
+"#;
+        assert!(parser.enum_exists(source, "Phase"));
+        assert!(!parser.enum_exists(source, "Wallet"));
+        assert!(parser.struct_exists(source, "Wallet"));
+        assert!(!parser.struct_exists(source, "Phase"));
+    }
+
+    #[test]
+    fn test_type_member_at_position_and_definition() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+struct Wallet {
+    balance: Uint<64>,
+}
+enum Phase { day, night }
+"#;
+        // Struct field declaration.
+        let line = 2;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("balance").unwrap() as u32 + 1;
+        let (owner, member, kind) = parser.type_member_at_position(source, line, col).unwrap();
+        assert_eq!(owner, "Wallet");
+        assert_eq!(member, "balance");
+        assert_eq!(kind, TypeMemberKind::Field);
+        let field_def = parser
+            .find_member_definition_location(source, "Wallet", "balance", TypeMemberKind::Field)
+            .expect("field definition range");
+        assert_eq!(field_def.start.line, 2);
+        assert_eq!(
+            field_def.start.character,
+            text.find("balance").unwrap() as u32
+        );
+
+        // Enum variant declaration.
+        let line = 4;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("night").unwrap() as u32 + 1;
+        let (owner, member, kind) = parser.type_member_at_position(source, line, col).unwrap();
+        assert_eq!(owner, "Phase");
+        assert_eq!(member, "night");
+        assert_eq!(kind, TypeMemberKind::Variant);
+        let variant_def = parser
+            .find_member_definition_location(source, "Phase", "night", TypeMemberKind::Variant)
+            .expect("variant definition range");
+        assert_eq!(variant_def.start.line, 4);
+        assert_eq!(
+            variant_def.start.character,
+            text.find("night").unwrap() as u32
+        );
     }
 
     #[test]

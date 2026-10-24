@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument types at the call site (`circuit id<T>(x: T): T` called as `id(token)` resolves to
   `token`'s type), and generic struct fields substitute the receiver's arguments (`Box<Token>.value`
   → `Token`).
+- **Find References and Rename for struct fields and enum variants** (`w.balance`, `Phase.day`),
+  gated by the owner type (including imported structs/enums) so unrelated members that share a name
+  are never touched.
 
 ## [0.4.0] - 2026-10-24
 

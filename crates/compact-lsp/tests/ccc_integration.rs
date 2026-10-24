@@ -1259,3 +1259,241 @@ circuit useIt(): Boolean {
     assert_member_features(&mut client, &main_uri, main_src, 8, "token.compact", 2);
     client.shutdown();
 }
+
+/// Find References for a struct field, cross-file, gated by the owner struct.
+#[test]
+fn test_struct_field_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wallet_src = r#"
+export struct Wallet {
+    balance: Uint<64>,
+}
+"#;
+    let main_src = r#"
+import "./wallet" prefix W_;
+
+circuit useIt(w: W_Wallet): Uint<64> {
+    const x = w.balance;
+    return w.balance + x;
+}
+"#;
+
+    let wallet_file = dir.path().join("wallet.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&wallet_file, wallet_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let wallet_uri = format!("file://{}", wallet_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &wallet_uri, wallet_src);
+    open(&mut client, &main_uri, main_src);
+
+    // From the field declaration.
+    let refs = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": wallet_uri },
+            "position": { "line": 2, "character": 5 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    let pairs = location_pairs(&refs);
+    assert_eq!(pairs.len(), 3, "expected def + 2 uses: {refs}");
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("wallet.compact") && *l == 2),
+        "missing declaration: {refs}"
+    );
+    assert!(
+        pairs
+            .iter()
+            .filter(|(u, _)| u.contains("caller.compact"))
+            .count()
+            == 2,
+        "expected 2 caller uses: {refs}"
+    );
+
+    client.shutdown();
+}
+
+/// Rename a struct field, cross-file, gated by the owner struct.
+#[test]
+fn test_struct_field_rename() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wallet_src = r#"
+export struct Wallet {
+    balance: Uint<64>,
+}
+"#;
+    let main_src = r#"
+import "./wallet" prefix W_;
+
+circuit useIt(w: W_Wallet): Uint<64> {
+    const x = w.balance;
+    return w.balance + x;
+}
+"#;
+
+    let wallet_file = dir.path().join("wallet.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&wallet_file, wallet_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let wallet_uri = format!("file://{}", wallet_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &wallet_uri, wallet_src);
+    open(&mut client, &main_uri, main_src);
+
+    let edit = client.request(
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": wallet_uri },
+            "position": { "line": 2, "character": 5 },
+            "newName": "amount"
+        }),
+    );
+    let changes = edit
+        .pointer("/result/changes")
+        .and_then(|c| c.as_object())
+        .unwrap_or_else(|| panic!("expected workspace edit changes: {edit}"));
+    let mut wallet_edits = 0;
+    let mut caller_edits = 0;
+    for (uri, edits) in changes {
+        let arr = edits.as_array().expect("edits array");
+        for e in arr {
+            assert_eq!(e.get("newText").and_then(|v| v.as_str()), Some("amount"));
+        }
+        if uri.contains("wallet.compact") {
+            wallet_edits += arr.len();
+        }
+        if uri.contains("caller.compact") {
+            caller_edits += arr.len();
+        }
+    }
+    assert_eq!(wallet_edits, 1, "declaration edit: {edit}");
+    assert_eq!(caller_edits, 2, "usage edits: {edit}");
+
+    client.shutdown();
+}
+
+/// Find References for an enum variant, cross-file, gated by the owner enum.
+#[test]
+fn test_enum_variant_references() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let phase_src = r#"
+export enum Phase { day, night }
+"#;
+    let main_src = r#"
+import "./phase" prefix P_;
+
+circuit useIt(p: P_Phase): Boolean {
+    const d = P_Phase.day;
+    return p == P_Phase.day && d == P_Phase.day;
+}
+"#;
+
+    let phase_file = dir.path().join("phase.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&phase_file, phase_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let phase_uri = format!("file://{}", phase_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &phase_uri, phase_src);
+    open(&mut client, &main_uri, main_src);
+
+    // From the variant declaration (`day` starts at char 19).
+    let refs = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": phase_uri },
+            "position": { "line": 1, "character": 20 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    let pairs = location_pairs(&refs);
+    let caller_uses = pairs
+        .iter()
+        .filter(|(u, _)| u.contains("caller.compact"))
+        .count();
+    assert!(
+        pairs
+            .iter()
+            .any(|(u, l)| u.contains("phase.compact") && *l == 1),
+        "missing declaration: {refs}"
+    );
+    assert_eq!(caller_uses, 3, "expected 3 variant uses: {refs}");
+
+    client.shutdown();
+}
+
+/// Rename an enum variant, cross-file, gated by the owner enum.
+#[test]
+fn test_enum_variant_rename() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let phase_src = r#"
+export enum Phase { day, night }
+"#;
+    let main_src = r#"
+import "./phase" prefix P_;
+
+circuit useIt(p: P_Phase): Boolean {
+    const d = P_Phase.day;
+    return p == P_Phase.day && d == P_Phase.day;
+}
+"#;
+
+    let phase_file = dir.path().join("phase.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&phase_file, phase_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let phase_uri = format!("file://{}", phase_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &phase_uri, phase_src);
+    open(&mut client, &main_uri, main_src);
+
+    let edit = client.request(
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": phase_uri },
+            "position": { "line": 1, "character": 20 },
+            "newName": "monday"
+        }),
+    );
+    let changes = edit
+        .pointer("/result/changes")
+        .and_then(|c| c.as_object())
+        .unwrap_or_else(|| panic!("expected workspace edit changes: {edit}"));
+    let mut phase_edits = 0;
+    let mut caller_edits = 0;
+    for (uri, edits) in changes {
+        let arr = edits.as_array().expect("edits array");
+        for e in arr {
+            assert_eq!(e.get("newText").and_then(|v| v.as_str()), Some("monday"));
+        }
+        if uri.contains("phase.compact") {
+            phase_edits += arr.len();
+        }
+        if uri.contains("caller.compact") {
+            caller_edits += arr.len();
+        }
+    }
+    assert_eq!(phase_edits, 1, "declaration edit: {edit}");
+    assert_eq!(caller_edits, 3, "usage edits: {edit}");
+
+    client.shutdown();
+}
