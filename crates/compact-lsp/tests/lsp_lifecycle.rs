@@ -311,3 +311,25 @@ fn test_malformed_json_closes_cleanly() {
     let status = status.expect("server did not terminate after a protocol error");
     assert!(status.success(), "server exited abnormally: {status}");
 }
+
+/// An immediate publish (save) cancels the pending debounced compiler pass,
+/// so stale diagnostics cannot arrive afterwards.
+#[test]
+fn test_save_cancels_pending_debounce() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root_uri = format!("file://{}", temp.path().display());
+    let uri = format!("{root_uri}/main.compact");
+    let mut client = start_client(&root_uri);
+    open_and_wait(&mut client, &uri, BASE);
+
+    // A change schedules the debounced pass...
+    change_full(&mut client, &uri, 2, BASE);
+    client.wait_for_diagnostics(&uri);
+
+    // ...and saving publishes immediately and supersedes it.
+    save(&mut client, &uri);
+    client.wait_for_diagnostics(&uri);
+    client.assert_no_diagnostics_for(&uri, Duration::from_millis(900));
+
+    client.shutdown();
+}

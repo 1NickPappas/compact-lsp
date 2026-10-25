@@ -140,3 +140,34 @@ async fn test_lsp_diagnostics_match_engine() {
 
     client.shutdown();
 }
+
+/// `didOpen` must diagnose the in-memory buffer, not the file on disk: an
+/// editor can open a dirty buffer whose saved copy is valid.
+#[tokio::test]
+async fn test_open_diagnostics_use_buffer_not_disk() {
+    if !require_compiler() {
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("dirty.compact");
+    let valid =
+        "import CompactStandardLibrary;\n\nexport circuit ok(): Uint<8> {\n  return 1;\n}\n";
+    let invalid = "import CompactStandardLibrary;\n\nexport circuit ok(): Uint<8> {\n  return noSuchSymbol;\n}\n";
+    std::fs::write(&path, valid).expect("write valid disk copy");
+
+    let uri = format!("file://{}", path.display());
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", temp.path().display()));
+    open(&mut client, &uri, invalid);
+
+    let published = client.wait_for_diagnostics(&uri);
+    assert!(
+        lsp_entries(&published)
+            .iter()
+            .any(|(_, _, message)| message.contains("unbound identifier noSuchSymbol")),
+        "diagnostics should come from the buffer, not the valid disk copy: {published:#?}"
+    );
+
+    client.shutdown();
+}
