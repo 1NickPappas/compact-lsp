@@ -306,6 +306,36 @@ pub fn compiler_available() -> bool {
     compact_analyzer::DiagnosticEngine::new().is_available()
 }
 
+/// Whether `format-compact` is detectable by the same logic the server uses.
+pub fn formatter_available() -> bool {
+    compact_analyzer::FormatterEngine::new().is_available()
+}
+
+/// Skip a formatter-dependent test when no `format-compact` is present.
+///
+/// With `COMPACT_LSP_REQUIRE_FORMATTER=1` set, a missing formatter is a hard
+/// failure instead of a silent skip.
+pub fn require_formatter() -> bool {
+    if formatter_available() {
+        return true;
+    }
+    if std::env::var_os("COMPACT_LSP_REQUIRE_FORMATTER").is_some() {
+        panic!("COMPACT_LSP_REQUIRE_FORMATTER is set but no format-compact was detected");
+    }
+    eprintln!("skipping: no format-compact detected");
+    false
+}
+
+/// Line and character of the first occurrence of `needle` in `source`.
+pub fn position_of(source: &str, needle: &str) -> (u32, u32) {
+    for (line, text) in source.lines().enumerate() {
+        if let Some(character) = text.find(needle) {
+            return (line as u32, character as u32);
+        }
+    }
+    panic!("needle `{needle}` not found")
+}
+
 /// Skip a compiler-dependent test when no compiler is present.
 ///
 /// Returns `true` when the test should continue. With
