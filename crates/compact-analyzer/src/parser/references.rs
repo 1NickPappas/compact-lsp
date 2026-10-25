@@ -86,6 +86,18 @@ impl ParserEngine {
                     });
                 }
             }
+            // Selective imports bind the exported symbol, so the element id is
+            // a reference: `import { Order } from "./lib"`.
+            "import_element" => {
+                if let Some(id) = node.child_by_field_name("id")
+                    && self.node_text(id, source) == symbol_name
+                {
+                    refs.push(ReferenceLocation {
+                        range: self.node_range(id),
+                        is_definition: false,
+                    });
+                }
+            }
             _ => {}
         }
 

@@ -366,6 +366,11 @@ impl CompactLanguageServer {
             };
 
         let mut all_locations = Vec::new();
+        // Dedupe by physical file: the open document is keyed by the client's
+        // URI, while the workspace scan caches canonical paths, so the same
+        // file can appear under two spellings (e.g. /var vs /private/var).
+        let mut seen_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+        seen_files.insert(canonical_key(&uri_string));
 
         let local_refs = {
             let mut parser = self.parser_engine.lock().unwrap();
@@ -384,7 +389,7 @@ impl CompactLanguageServer {
 
         for entry in self.source_cache.iter() {
             let file_uri = entry.key();
-            if file_uri == &uri_string {
+            if !seen_files.insert(canonical_key(file_uri)) {
                 continue;
             }
 
@@ -534,6 +539,9 @@ impl CompactLanguageServer {
 
         let mut changes: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
             std::collections::HashMap::new();
+        // Dedupe by physical file; see `handle_references`.
+        let mut seen_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+        seen_files.insert(canonical_key(&uri_string));
 
         let local_refs = {
             let mut parser = self.parser_engine.lock().unwrap();
@@ -549,7 +557,7 @@ impl CompactLanguageServer {
 
         for entry in self.source_cache.iter() {
             let file_uri = entry.key();
-            if file_uri == &uri_string {
+            if !seen_files.insert(canonical_key(file_uri)) {
                 continue;
             }
 
@@ -562,11 +570,16 @@ impl CompactLanguageServer {
                     parser.find_references(file_content, &search_name)
                 };
 
-                let new_name_for_file = if search_name != old_name {
-                    let prefix = &search_name[..search_name.len() - old_name.len()];
+                // Search names are either the plain symbol, `<prefix><symbol>`
+                // for prefix imports, or an alias. Only the prefixed form is
+                // rewritten; an alias binding (and its usages) must stay as-is,
+                // since the renamed export is referenced through the alias.
+                let new_name_for_file = if search_name == old_name {
+                    new_name.clone()
+                } else if let Some(prefix) = search_name.strip_suffix(&old_name) {
                     format!("{}{}", prefix, new_name)
                 } else {
-                    new_name.clone()
+                    continue;
                 };
 
                 for r in refs {

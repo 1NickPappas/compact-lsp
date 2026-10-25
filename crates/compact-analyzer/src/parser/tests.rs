@@ -2021,3 +2021,28 @@ fn test_hover_no_doc_comment() {
         info.content
     );
 }
+
+#[test]
+fn test_find_references_selective_import_element() {
+    let mut parser = ParserEngine::new();
+    let source = r#"import { Order, total as totalOf } from "./lib";
+
+circuit useIt(order: Order): Uint<64> {
+    return totalOf(order);
+}
+"#;
+    let refs = parser.find_references(source, "Order");
+
+    // The import element and the parameter type are both references; the
+    // selective import does not define `Order` locally.
+    assert_eq!(refs.len(), 2, "expected import element + type reference");
+    assert!(refs.iter().all(|r| !r.is_definition));
+    assert_eq!(
+        refs[0].range.start.line, 0,
+        "first ref is the import element"
+    );
+    assert_eq!(
+        refs[1].range.start.line, 2,
+        "second ref is the parameter type"
+    );
+}

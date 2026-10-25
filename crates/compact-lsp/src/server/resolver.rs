@@ -404,7 +404,7 @@ impl CompactLanguageServer {
                 continue;
             }
             if let Some(resolved) = imports::resolve_import_path(searching_file, &import.path)
-                && resolved == defining_file
+                && same_file(&resolved, defining_file)
             {
                 // Selective imports may bind the symbol under an alias.
                 for (element, alias) in &import.elements {
@@ -424,7 +424,16 @@ impl CompactLanguageServer {
             names.push(symbol_name.to_string());
         }
 
-        names
+        // A selective import without a prefix contributes the element name and
+        // the (prefix-less) fallback, which are the same string; de-duplicate
+        // so references are not collected twice.
+        let mut unique = Vec::with_capacity(names.len());
+        for name in names {
+            if !unique.contains(&name) {
+                unique.push(name);
+            }
+        }
+        unique
     }
     pub(super) fn find_imported_symbol(
         &self,
