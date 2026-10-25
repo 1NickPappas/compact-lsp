@@ -17,10 +17,7 @@ impl ParserEngine {
         let source_bytes = source.as_bytes();
 
         // Convert LSP position to tree-sitter point
-        let point = tree_sitter::Point {
-            row: line as usize,
-            column: character as usize,
-        };
+        let point = self.point_from_utf16(line, character);
 
         // Find the node at this position
         let node = root.descendant_for_point_range(point, point)?;

@@ -228,16 +228,16 @@ impl ParserEngine {
         };
 
         if let Some(fold_kind) = fold_kind {
-            let start = node.start_position();
-            let end = node.end_position();
+            let start = self.point_to_position(node.start_position());
+            let end = self.point_to_position(node.end_position());
 
             // Only fold if spans multiple lines
-            if end.row > start.row {
+            if end.line > start.line {
                 ranges.push(FoldingRange {
-                    start_line: start.row as u32,
-                    start_character: Some(start.column as u32),
-                    end_line: end.row as u32,
-                    end_character: Some(end.column as u32),
+                    start_line: start.line,
+                    start_character: Some(start.character),
+                    end_line: end.line,
+                    end_character: Some(end.character),
                     kind: Some(fold_kind),
                     collapsed_text: None,
                 });

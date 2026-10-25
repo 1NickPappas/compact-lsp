@@ -97,7 +97,6 @@ file where a contract-typed reference uses it. `contract implements` requires la
 | Area | Status |
 |------|--------|
 | Code Actions | Not implemented |
-| Non-ASCII positions | Positions are UTF-16/byte mismatched: any line where a non-ASCII character precedes code (e.g. `/* 😀 */ circuit f()`) gets wrong ranges for hover/definition/references/rename/semantic tokens, and `didChange` positions after an astral character land one character early. The failing cases are pinned as ignored tests in `crates/compact-lsp/tests/unicode_positions.rs` (see [TESTING.md](./TESTING.md#known-issues)) |
 | Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`, `tokens.lookup(k).circuit(...)`), index bases (`items[i].circuit(...)`), and field access on a method result (`items.head().value.circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Generic parameters come from explicit call-site type arguments (`first<Uint<64>>(m)`) or, as a superset of the compiler, from an argument whose type directly matches the parameter (`id<T>(x: T)` as `id(token)`), and generic struct fields substitute (`Box<Token>.value`); generic *methods* are not a Compact construct |
 
 ## Requirements

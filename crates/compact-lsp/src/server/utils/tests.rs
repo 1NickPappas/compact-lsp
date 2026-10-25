@@ -144,3 +144,36 @@ fn test_detect_dot_context_multiline() {
     // Line 2: "  round.increment(1);" - cursor on "increment" at col 8
     assert_eq!(detect_dot_context(content, 2, 8), Some("round".to_string()));
 }
+
+#[test]
+fn test_utf16_word_lookup_after_non_ascii() {
+    // `/* 😀 */ foo` — `foo` starts at byte 11 but UTF-16 column 9.
+    let line = "/* 😀 */ foo";
+    let utf16 = line[..line.find("foo").unwrap()]
+        .chars()
+        .map(char::len_utf16)
+        .sum::<usize>() as u32;
+    assert_eq!(
+        get_word_at_position(line, 0, utf16 + 1).as_deref(),
+        Some("foo")
+    );
+
+    let range = get_word_range_at_position(line, 0, utf16 + 1).expect("range");
+    assert_eq!(range.start.character, utf16);
+    assert_eq!(range.end.character, utf16 + 3);
+}
+
+#[test]
+fn test_utf16_dot_context_after_non_ascii() {
+    // The base name is found and the dot position is counted in UTF-16.
+    let line = "/* 日本語 */ obj.";
+    let utf16_len = line.chars().map(char::len_utf16).sum::<usize>() as u32;
+    assert_eq!(
+        detect_dot_context(line, 0, utf16_len).as_deref(),
+        Some("obj")
+    );
+    assert_eq!(
+        get_dot_access_variable(line, 0, utf16_len).as_deref(),
+        Some("obj")
+    );
+}

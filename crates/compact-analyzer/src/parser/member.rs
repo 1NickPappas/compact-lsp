@@ -17,10 +17,7 @@ impl ParserEngine {
         let root = tree.root_node();
         let source_bytes = source.as_bytes();
 
-        let point = tree_sitter::Point {
-            row: line as usize,
-            column: character as usize,
-        };
+        let point = self.point_from_utf16(line, character);
 
         // Find the deepest node at this position
         let node = root.descendant_for_point_range(point, point)?;
@@ -259,10 +256,7 @@ impl ParserEngine {
         let tree = self.parse(source)?;
         let root = tree.root_node();
         let bytes = source.as_bytes();
-        let point = tree_sitter::Point {
-            row: line as usize,
-            column: character as usize,
-        };
+        let point = self.point_from_utf16(line, character);
         let node = root.descendant_for_point_range(point, point)?;
         if node.kind() != "id" {
             return None;
@@ -405,10 +399,7 @@ impl ParserEngine {
         let tree = self.parse(source)?;
         let root = tree.root_node();
         let source_bytes = source.as_bytes();
-        let point = tree_sitter::Point {
-            row: line as usize,
-            column: character as usize,
-        };
+        let point = self.point_from_utf16(line, character);
         let node = root.descendant_for_point_range(point, point)?;
         let parent = node.parent()?;
         if parent.kind() != "ecdecl_circuit" {
@@ -441,10 +432,7 @@ impl ParserEngine {
     ) -> Option<MemberAccessContext> {
         let tree = self.parse(source)?;
         let root = tree.root_node();
-        let point = tree_sitter::Point {
-            row: line as usize,
-            column: character as usize,
-        };
+        let point = self.point_from_utf16(line, character);
         let mut node = root.descendant_for_point_range(point, point)?;
         loop {
             if node.kind() == "member_access_expr"

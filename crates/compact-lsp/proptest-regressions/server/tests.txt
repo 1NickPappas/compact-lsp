@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc c73fdc62b25b85caf4572629048c1b92b25da8f769e8c1a07d6fbd0f07a63af1 # shrinks to original = "\n", formatted = " ", start = 1, end = 1
+cc 149c1dd849c5d3629c01168f9cb75065559395e5f988c58a113c7a3301e462c3 # shrinks to original = "\n¡", formatted = "¢\0\n", start = 0, end = 0

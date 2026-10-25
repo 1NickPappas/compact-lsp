@@ -2046,3 +2046,27 @@ circuit useIt(order: Order): Uint<64> {
         "second ref is the parameter type"
     );
 }
+
+#[test]
+fn test_utf16_point_conversions() {
+    let mut parser = ParserEngine::new();
+    parser.parse("/* 😀 */ x\né y\n");
+
+    // Byte column 11 (after the emoji block comment) is UTF-16 column 9.
+    assert_eq!(
+        parser
+            .point_to_position(tree_sitter::Point { row: 0, column: 11 })
+            .character,
+        9
+    );
+    assert_eq!(parser.point_from_utf16(0, 9).column, 11);
+
+    // `é` is two bytes but one UTF-16 code unit.
+    assert_eq!(
+        parser
+            .point_to_position(tree_sitter::Point { row: 1, column: 2 })
+            .character,
+        1
+    );
+    assert_eq!(parser.point_from_utf16(1, 2).column, 3);
+}

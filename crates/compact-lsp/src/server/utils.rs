@@ -2,19 +2,39 @@
 
 use lsp_types::{Position, Range};
 
+/// Convert an LSP UTF-16 character offset into a `char` index in `line`.
+fn utf16_to_char_index(line: &str, character: u32) -> usize {
+    let mut utf16 = 0usize;
+    for (char_index, ch) in line.chars().enumerate() {
+        if utf16 >= character as usize {
+            return char_index;
+        }
+        utf16 += ch.len_utf16();
+    }
+    line.chars().count()
+}
+
+/// Convert a `char` index in `line` into an LSP UTF-16 character offset.
+fn char_index_to_utf16(line: &str, char_index: usize) -> u32 {
+    line.chars()
+        .take(char_index)
+        .map(char::len_utf16)
+        .sum::<usize>() as u32
+}
+
 /// Get the word (identifier) at a given position in the source.
 pub fn get_word_at_position(content: &str, line: u32, character: u32) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
     let line_content = lines.get(line as usize)?;
-    let char_idx = character as usize;
-
-    // Check if position is within bounds
-    if char_idx > line_content.len() {
-        return None;
-    }
 
     // Find word boundaries (identifiers can contain a-z, A-Z, 0-9, _)
     let chars: Vec<char> = line_content.chars().collect();
+    let char_idx = utf16_to_char_index(line_content, character);
+
+    // Check if position is within bounds
+    if char_idx > chars.len() {
+        return None;
+    }
 
     // Find start of word
     let mut start = char_idx;
@@ -50,12 +70,11 @@ pub fn get_word_range_at_position(content: &str, line: u32, character: u32) -> O
     let lines: Vec<&str> = content.lines().collect();
     let line_content = lines.get(line as usize)?;
 
-    let char_idx = character as usize;
-    if char_idx > line_content.len() {
+    let chars: Vec<char> = line_content.chars().collect();
+    let char_idx = utf16_to_char_index(line_content, character);
+    if char_idx > chars.len() {
         return None;
     }
-
-    let chars: Vec<char> = line_content.chars().collect();
 
     // Find word boundaries
     let mut start = char_idx;
@@ -85,11 +104,11 @@ pub fn get_word_range_at_position(content: &str, line: u32, character: u32) -> O
     Some(Range {
         start: Position {
             line,
-            character: start as u32,
+            character: char_index_to_utf16(line_content, start),
         },
         end: Position {
             line,
-            character: end as u32,
+            character: char_index_to_utf16(line_content, end),
         },
     })
 }
@@ -101,7 +120,7 @@ pub fn get_function_call_name(content: &str, line: u32, character: u32) -> Optio
 
     // Search backwards from cursor to find the opening paren
     let chars: Vec<char> = line_content.chars().collect();
-    let mut idx = character as usize;
+    let mut idx = utf16_to_char_index(line_content, character);
 
     // First, find the opening paren of our call (handling nested parens)
     let mut paren_depth = 0;
@@ -162,7 +181,7 @@ pub fn count_commas_before_cursor(content: &str, line: u32, character: u32) -> u
     };
 
     let chars: Vec<char> = line_content.chars().collect();
-    let cursor_idx = character as usize;
+    let cursor_idx = utf16_to_char_index(line_content, character);
     let mut comma_count = 0;
     let mut paren_depth = 0;
 
@@ -231,7 +250,10 @@ pub fn is_after_contract_implements(content: &str, line: u32, character: u32) ->
     let Some(line_content) = content.lines().nth(line as usize) else {
         return false;
     };
-    let before: String = line_content.chars().take(character as usize).collect();
+    let before: String = line_content
+        .chars()
+        .take(utf16_to_char_index(line_content, character))
+        .collect();
     if before.contains(';') {
         return false;
     }
@@ -241,13 +263,13 @@ pub fn is_after_contract_implements(content: &str, line: u32, character: u32) ->
 pub fn detect_dot_context(content: &str, line: u32, character: u32) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
     let line_content = lines.get(line as usize)?;
-    let char_idx = character as usize;
-
-    if char_idx > line_content.len() {
-        return None;
-    }
 
     let chars: Vec<char> = line_content.chars().collect();
+    let char_idx = utf16_to_char_index(line_content, character);
+
+    if char_idx > chars.len() {
+        return None;
+    }
 
     // Skip backwards over any partial identifier (e.g., the "inc" in "round.inc|")
     let mut idx = char_idx;
@@ -302,13 +324,13 @@ pub fn detect_dot_context(content: &str, line: u32, character: u32) -> Option<St
 pub fn get_dot_access_variable(content: &str, line: u32, character: u32) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
     let line_content = lines.get(line as usize)?;
-    let char_idx = character as usize;
+
+    let chars: Vec<char> = line_content.chars().collect();
+    let char_idx = utf16_to_char_index(line_content, character);
 
     if char_idx == 0 {
         return None;
     }
-
-    let chars: Vec<char> = line_content.chars().collect();
 
     // The character before the cursor should be '.'
     let dot_idx = char_idx - 1;

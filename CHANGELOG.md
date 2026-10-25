@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Correct UTF-16 positions (non-ASCII lines).** tree-sitter reports byte columns while LSP positions
+  are UTF-16 code units; ranges following a non-ASCII character on the same line (e.g.
+  `/* 😀 */ circuit f()`) were wrong for hover, definition, references, rename, semantic tokens,
+  document symbols and folding, and `didChange` positions after an astral character landed one
+  character early. Byte columns are now translated to UTF-16 on output, UTF-16 positions to byte
+  offsets on input, and rope edits use UTF-16 indices.
 - **Live diagnostics now use the in-memory buffer for open documents.** Previously `didOpen`
   compiled the file on disk, so a dirty buffer showed stale errors (and an unsaved new file got
   none).

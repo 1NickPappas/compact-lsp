@@ -25,3 +25,7 @@ export circuit greet(): Greeting {
 /* 日本語 */ export circuit cjkCircuit(): Uint<8> {
   return 2;
 }
+
+export circuit callEmoji(): Uint<8> {
+  return emojiCircuit();
+}

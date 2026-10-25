@@ -1,18 +1,16 @@
 //! Position-encoding tests: non-ASCII text on the same line as code.
 //!
 //! LSP positions use UTF-16 code units by default, while tree-sitter reports
-//! byte columns (`Point.column`). The server currently passes one for the
-//! other, so every range that follows a non-ASCII character on the same line
-//! is wrong, and `didChange` positions after an astral character land one
-//! character early.
+//! byte columns (`Point.column`). The analyzer translates byte columns to
+//! UTF-16 on output and UTF-16 positions to byte offsets on input
+//! (`ParserEngine::point_to_position` / `point_from_utf16`), the server text
+//! utilities do the same, and rope edits use ropey's UTF-16 indices.
 //!
-//! The failing cases are pinned as `#[ignore]`d acceptance tests that encode
-//! the correct behaviour: they must pass once byte columns are converted to
-//! UTF-16 on output and UTF-16 positions to byte offsets on input. The
-//! ASCII-only case at the bottom passes today and scopes the bug to lines
-//! that actually contain non-ASCII before the symbol.
-//!
-//! See TESTING.md#known-issues.
+//! These tests guard that boundary: ranged responses on a line that contains a
+//! leading emoji/CJK block comment, a definition target on such a line, rename
+//! edits applied in UTF-16 coordinates, and an incremental `didChange` whose
+//! position follows an astral character. The ASCII-only test at the bottom
+//! scopes any future regression to non-ASCII lines.
 
 mod common;
 
@@ -99,7 +97,6 @@ fn test_ascii_lines_around_unicode_comments_work() {
 /// The hover range must start at the UTF-16 column of the declaration, not
 /// its byte column.
 #[test]
-#[ignore = "byte columns are reported as UTF-16 positions (see TESTING.md#known-issues)"]
 fn test_hover_range_on_non_ascii_line() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = copy_fixtures_to(temp.path());
@@ -131,9 +128,9 @@ fn test_hover_range_on_non_ascii_line() {
 }
 
 /// A definition target on a non-ASCII line must be reported at its UTF-16
-/// column so the editor lands on the identifier.
+/// column so the editor lands on the identifier. The request is made from the
+/// call site (an ASCII line) and targets the declaration line.
 #[test]
-#[ignore = "byte columns are reported as UTF-16 positions (see TESTING.md#known-issues)"]
 fn test_definition_targets_utf16_column() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = copy_fixtures_to(temp.path());
@@ -144,15 +141,23 @@ fn test_definition_targets_utf16_column() {
     let (uri, source) = read_fixture(&root, "unicode/comments.compact");
     open_and_wait(&mut client, &uri, &source);
 
-    let (line, column) = utf16_position_of(&source, "emojiCircuit");
-    let response = definition(&mut client, &uri, line, column + 1);
+    let (call_line, call_column) = utf16_position_of(&source, "return emojiCircuit()");
+    let call_column = call_column + "return ".len() as u32;
+    let response = definition(&mut client, &uri, call_line, call_column + 1);
     let result = ascii_result(&response);
     assert!(!result.is_null(), "definition failed: {response}");
+
+    let (declaration_line, declaration_column) = utf16_position_of(&source, "emojiCircuit");
+    assert_eq!(
+        result.pointer("/range/start/line").and_then(Value::as_u64),
+        Some(declaration_line as u64),
+        "definition should point at the declaration line: {response}"
+    );
     assert_eq!(
         result
             .pointer("/range/start/character")
             .and_then(Value::as_u64),
-        Some(column as u64),
+        Some(declaration_column as u64),
         "definition range must use the UTF-16 column: {response}"
     );
 
@@ -162,7 +167,6 @@ fn test_definition_targets_utf16_column() {
 /// Rename edits are applied by clients in UTF-16 coordinates, so byte-column
 /// ranges corrupt the file.
 #[tokio::test]
-#[ignore = "byte columns are reported as UTF-16 positions (see TESTING.md#known-issues)"]
 async fn test_rename_edit_uses_utf16_columns() {
     if !require_compiler() {
         return;
@@ -203,7 +207,6 @@ async fn test_rename_edit_uses_utf16_columns() {
 /// where the client asked; a character-index/UTF-16 mix-up inserts one
 /// character early and breaks the code.
 #[test]
-#[ignore = "didChange positions after astral characters are off by one (see TESTING.md#known-issues)"]
 fn test_didchange_position_after_astral_char() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root_uri = format!("file://{}", temp.path().display());

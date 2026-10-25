@@ -43,6 +43,9 @@ impl Document {
 
     /// Char index for an LSP position, clamped to the document (and to the
     /// line when the position is within it).
+    ///
+    /// `position.character` is a UTF-16 code-unit offset (the LSP default
+    /// encoding), so it is translated rather than added to the char index.
     fn char_index(&self, position: &Position) -> usize {
         let line = position.line as usize;
         if line >= self.content.len_lines() {
@@ -54,7 +57,10 @@ impl Document {
         } else {
             self.content.len_chars()
         };
-        (line_start + position.character as usize).min(line_end)
+        let start_utf16 = self.content.char_to_utf16_cu(line_start);
+        let end_utf16 = self.content.char_to_utf16_cu(line_end);
+        let target_utf16 = (start_utf16 + position.character as usize).min(end_utf16);
+        self.content.utf16_cu_to_char(target_utf16)
     }
 }
 

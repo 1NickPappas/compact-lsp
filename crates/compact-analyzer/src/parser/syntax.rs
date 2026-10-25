@@ -84,33 +84,75 @@ impl ParserEngine {
         text.to_string()
     }
 
+    /// Text of `row` in the most recently parsed source, without its newline.
+    pub(super) fn line_text(&self, row: usize) -> &str {
+        let Some(&start) = self.line_starts.get(row) else {
+            return "";
+        };
+        let end = self
+            .line_starts
+            .get(row + 1)
+            .map(|next| next - 1)
+            .unwrap_or(self.source.len());
+        &self.source[start..end.max(start)]
+    }
+
+    /// Translate a tree-sitter (byte-column) point into an LSP (UTF-16) position.
+    pub(super) fn point_to_position(&self, point: tree_sitter::Point) -> Position {
+        Position {
+            line: point.row as u32,
+            character: byte_col_to_utf16_col(self.line_text(point.row), point.column),
+        }
+    }
+
+    /// Translate an LSP (UTF-16) position into a tree-sitter (byte-column) point.
+    pub(super) fn point_from_utf16(&self, line: u32, character: u32) -> tree_sitter::Point {
+        tree_sitter::Point {
+            row: line as usize,
+            column: utf16_col_to_byte_col(self.line_text(line as usize), character),
+        }
+    }
+
     /// Convert tree-sitter node position to LSP Range.
     pub(super) fn node_range(&self, node: Node) -> Range {
-        let start = node.start_position();
-        let end = node.end_position();
         Range {
-            start: Position {
-                line: start.row as u32,
-                character: start.column as u32,
-            },
-            end: Position {
-                line: end.row as u32,
-                character: end.column as u32,
-            },
+            start: self.point_to_position(node.start_position()),
+            end: self.point_to_position(node.end_position()),
         }
     }
 
     /// Convert tree-sitter node position to SymbolLocation.
     pub(super) fn node_to_symbol_location(&self, node: Node) -> SymbolLocation {
-        let start = node.start_position();
-        let end = node.end_position();
+        let start = self.point_to_position(node.start_position());
+        let end = self.point_to_position(node.end_position());
         SymbolLocation {
-            start_line: start.row as u32,
-            start_char: start.column as u32,
-            end_line: end.row as u32,
-            end_char: end.column as u32,
+            start_line: start.line,
+            start_char: start.character,
+            end_line: end.line,
+            end_char: end.character,
         }
     }
+}
+
+/// UTF-16 code-unit offset of a byte column within a single line.
+pub(super) fn byte_col_to_utf16_col(line: &str, byte_col: usize) -> u32 {
+    let mut boundary = byte_col.min(line.len());
+    while boundary > 0 && !line.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    line[..boundary].chars().map(char::len_utf16).sum::<usize>() as u32
+}
+
+/// Byte column of a UTF-16 code-unit offset within a single line.
+pub(super) fn utf16_col_to_byte_col(line: &str, character: u32) -> usize {
+    let mut utf16 = 0usize;
+    for (byte, ch) in line.char_indices() {
+        if utf16 >= character as usize {
+            return byte;
+        }
+        utf16 += ch.len_utf16();
+    }
+    line.len()
 }
 
 pub fn is_builtin_type(name: &str) -> bool {
