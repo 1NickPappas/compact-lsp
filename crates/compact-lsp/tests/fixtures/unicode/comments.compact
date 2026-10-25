@@ -17,3 +17,11 @@ export struct Greeting {
 export circuit greet(): Greeting {
   return Greeting { message: pad(32, "hi"), mood: Mood.happy };
 }
+
+/* 😀 */ export circuit emojiCircuit(): Uint<8> {
+  return 1;
+}
+
+/* 日本語 */ export circuit cjkCircuit(): Uint<8> {
+  return 2;
+}
