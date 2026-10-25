@@ -12,9 +12,34 @@ impl ParserEngine {
             None => return vec![],
         };
 
+        let root = tree.root_node();
+        let source_bytes = source.as_bytes();
+        // A name declared as a type in this file can also be the base of a
+        // member access (`EnumName.variant`, `StructName.field`); a same-named
+        // variable must not be touched, so gate that case on the declaration.
+        let symbol_is_type = self.declares_type(root, source_bytes, symbol_name);
+
         let mut refs = Vec::new();
-        self.collect_references(tree.root_node(), source.as_bytes(), symbol_name, &mut refs);
+        self.collect_references(root, source_bytes, symbol_name, symbol_is_type, &mut refs);
         refs
+    }
+
+    /// Whether `name` is declared as a type in this tree.
+    pub(super) fn declares_type(&self, node: Node, source: &[u8], name: &str) -> bool {
+        if matches!(
+            node.kind(),
+            "struct" | "enumdef" | "mdefn" | "ecdecl" | "type_decl" | "type_alias_declaration"
+        ) && self.get_field_text(node, "name", source).as_deref() == Some(name)
+        {
+            return true;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if self.declares_type(child, source, name) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Recursively collect references to a symbol from the AST.
@@ -23,6 +48,7 @@ impl ParserEngine {
         node: Node,
         source: &[u8],
         symbol_name: &str,
+        symbol_is_type: bool,
         refs: &mut Vec<ReferenceLocation>,
     ) {
         let kind = node.kind();
@@ -98,13 +124,25 @@ impl ParserEngine {
                     });
                 }
             }
+            // Member-access base that names a type: `EnumName.variant`. The
+            // base may be an `id` or a `term` wrapping one, so compare text.
+            "member_access_expr" if symbol_is_type => {
+                if let Some(base) = node.child_by_field_name("base")
+                    && self.node_text(base, source) == symbol_name
+                {
+                    refs.push(ReferenceLocation {
+                        range: self.node_range(base),
+                        is_definition: false,
+                    });
+                }
+            }
             _ => {}
         }
 
         // Recurse into children
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.collect_references(child, source, symbol_name, refs);
+            self.collect_references(child, source, symbol_name, symbol_is_type, refs);
         }
     }
 

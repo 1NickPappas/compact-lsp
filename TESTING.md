@@ -76,9 +76,6 @@ Failing behaviour is pinned as `#[ignore]`d acceptance tests so it cannot be
 forgotten and so the fix has a ready-made target. Run them with
 `cargo test -- --ignored` (they are expected to fail until fixed).
 
-| Issue | Pinned by |
-|---|---|
-| **Renaming a type whose uses are member bases.** Renaming an enum type does not update `EnumName.variant` expressions, leaving the project uncompilable. | `compiler_edit_safety.rs::test_rename_enum_type_updates_variant_bases` (ignored) |
-
-Position encoding (UTF-16 ↔ tree-sitter byte columns) is covered by the
-active `crates/compact-lsp/tests/unicode_positions.rs` suite.
+There are currently no ignored tests: the UTF-16 position encoding and
+enum-type rename issues have been fixed. Add a row here if a future known
+limitation is pinned that way.

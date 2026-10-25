@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Renaming an enum type now updates its member-access bases.** `textDocument/rename` on
+  `enum TokenStatus` rewrites `TokenStatus.paused` / `TokenStatus.active` too, so the project keeps
+  compiling. Member-access bases are only collected when the name is declared as a type in the
+  file, so same-named variables are left alone.
 - **Correct UTF-16 positions (non-ASCII lines).** tree-sitter reports byte columns while LSP positions
   are UTF-16 code units; ranges following a non-ASCII character on the same line (e.g.
   `/* 😀 */ circuit f()`) were wrong for hover, definition, references, rename, semantic tokens,

@@ -2070,3 +2070,39 @@ fn test_utf16_point_conversions() {
     );
     assert_eq!(parser.point_from_utf16(1, 2).column, 3);
 }
+
+#[test]
+fn test_find_references_enum_type_includes_variant_bases() {
+    let mut parser = ParserEngine::new();
+    let source = r#"
+enum Color { red, green }
+
+circuit f(c: Color): Color {
+    return c == Color.red ? Color.green : Color.red;
+}
+"#;
+    let refs = parser.find_references(source, "Color");
+
+    assert_eq!(
+        refs.iter().filter(|r| r.is_definition).count(),
+        1,
+        "exactly one definition: {refs:?}"
+    );
+    // Definition + parameter type + return type + three `Color.variant` bases.
+    assert_eq!(refs.len(), 6, "{refs:?}");
+}
+
+/// A variable used as a member-access base must not be collected when its name
+/// is not a declared type (renaming variables is out of scope here).
+#[test]
+fn test_find_references_variable_base_not_collected() {
+    let mut parser = ParserEngine::new();
+    let source = r#"
+struct S { x: Field; }
+circuit f(s: S): Field {
+    return s.x;
+}
+"#;
+    let refs = parser.find_references(source, "s");
+    assert!(refs.is_empty(), "{refs:?}");
+}

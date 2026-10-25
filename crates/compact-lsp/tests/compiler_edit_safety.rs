@@ -182,11 +182,9 @@ async fn test_rename_selective_element_preserves_alias() {
     client.shutdown();
 }
 
-/// Renaming a type whose uses are member-access bases (`EnumName.variant`)
-/// currently leaves those bases untouched, so the renamed project stops
-/// compiling. This is the acceptance test for closing that gap.
+/// Renaming an enum type must update its uses as member-access bases
+/// (`EnumName.variant`), not just the declaration and type positions.
 #[tokio::test]
-#[ignore = "renaming an enum type does not update `EnumName.variant` bases"]
 async fn test_rename_enum_type_updates_variant_bases() {
     if !require_compiler() {
         return;
