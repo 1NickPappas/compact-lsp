@@ -10,70 +10,17 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
-
+use common::{copy_fixtures_to, load_fixture_manifest, read_fixture};
 use compact_analyzer::{DiagnosticEngine, LanguageVersion};
-use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-struct Manifest {
-    compiles: Vec<String>,
-    #[serde(default)]
-    fails: Vec<Failure>,
-    #[serde(default)]
-    gated: Vec<Gated>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Failure {
-    file: String,
-    line: u32,
-    character: u32,
-    message_contains: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Gated {
-    file: String,
-    min_language_version: String,
-    above: String,
-    below: String,
-    #[serde(default)]
-    below_message_contains: Option<String>,
-}
-
-fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
-}
-
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("create fixture temp dir");
-    for entry in std::fs::read_dir(from).expect("read fixtures") {
-        let entry = entry.expect("fixture entry");
-        let target = to.join(entry.file_name());
-        if entry.file_type().expect("file type").is_dir() {
-            copy_dir(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).expect("copy fixture");
-        }
-    }
-}
-
-fn read_fixture(root: &Path, relative: &str) -> (String, String) {
-    let path = root.join(relative);
-    let content = std::fs::read_to_string(&path).expect("read fixture");
-    let uri = format!("file://{}", path.display());
-    (uri, content)
-}
-
-fn assert_compiles(diagnostics: &[lsp_types::Diagnostic], relative: &str) {
+pub fn assert_compiles(diagnostics: &[lsp_types::Diagnostic], relative: &str) {
     assert!(
         diagnostics.is_empty(),
         "{relative} should compile cleanly, got: {diagnostics:#?}"
     );
 }
 
-fn assert_fails(
+pub fn assert_fails(
     diagnostics: &[lsp_types::Diagnostic],
     relative: &str,
     line: Option<u32>,
@@ -102,18 +49,14 @@ async fn test_fixture_corpus_matches_engine() {
         return;
     }
 
-    let manifest =
-        std::fs::read_to_string(fixtures_dir().join("expected.toml")).expect("read expected.toml");
-    let manifest: Manifest = toml::from_str(&manifest).expect("parse expected.toml");
-
+    let manifest = load_fixture_manifest();
     let engine = DiagnosticEngine::new();
     let language = engine
         .language_version()
         .expect("detected compiler must report a language version");
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path().join("fixtures");
-    copy_dir(&fixtures_dir(), &root);
+    let root = copy_fixtures_to(temp.path());
 
     for relative in &manifest.compiles {
         let (uri, content) = read_fixture(&root, relative);

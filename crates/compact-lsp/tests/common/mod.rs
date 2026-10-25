@@ -10,11 +10,13 @@
 #![allow(dead_code)]
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -407,6 +409,86 @@ pub fn change_range(
 /// Send a full-document `didChange`.
 pub fn change_full(client: &mut LspClient, uri: &str, version: i32, text: &str) {
     change(client, uri, version, vec![json!({ "text": text })]);
+}
+
+// ---------------------------------------------------------------------------
+// Fixture corpus helpers
+// ---------------------------------------------------------------------------
+
+/// The parsed form of `tests/fixtures/expected.toml`.
+#[derive(Debug, Deserialize)]
+pub struct FixtureManifest {
+    pub compiles: Vec<String>,
+    #[serde(default)]
+    pub fails: Vec<FixtureFailure>,
+    #[serde(default)]
+    pub gated: Vec<FixtureGated>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FixtureFailure {
+    pub file: String,
+    pub line: u32,
+    pub character: u32,
+    pub message_contains: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FixtureGated {
+    pub file: String,
+    pub min_language_version: String,
+    pub above: String,
+    pub below: String,
+    #[serde(default)]
+    pub below_message_contains: Option<String>,
+}
+
+pub fn fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+pub fn load_fixture_manifest() -> FixtureManifest {
+    let text = std::fs::read_to_string(fixtures_dir().join("expected.toml"))
+        .expect("read fixtures/expected.toml");
+    toml::from_str(&text).expect("parse fixtures/expected.toml")
+}
+
+/// Recursively copy `from` into `to`.
+pub fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create fixture temp dir");
+    for entry in std::fs::read_dir(from).expect("read fixtures") {
+        let entry = entry.expect("fixture entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy fixture");
+        }
+    }
+}
+
+/// Copy the fixture corpus into `temp` and return the copied root.
+pub fn copy_fixtures_to(temp: &Path) -> PathBuf {
+    let root = temp.join("fixtures");
+    copy_dir(&fixtures_dir(), &root);
+    root
+}
+
+/// Read a fixture relative to `root`, returning `(uri, content)` where `uri`
+/// points at the on-disk copy.
+pub fn read_fixture(root: &Path, relative: &str) -> (String, String) {
+    let path = root.join(relative);
+    let content = std::fs::read_to_string(&path).expect("read fixture");
+    let uri = format!("file://{}", path.display());
+    (uri, content)
+}
+
+/// All fixture files referenced by the manifest, in stable order.
+pub fn manifest_files(manifest: &FixtureManifest) -> Vec<String> {
+    let mut files: Vec<String> = manifest.compiles.clone();
+    files.extend(manifest.fails.iter().map(|f| f.file.clone()));
+    files.extend(manifest.gated.iter().map(|g| g.file.clone()));
+    files
 }
 
 /// Extract `(uri, start line)` pairs from a `textDocument/references` response.
