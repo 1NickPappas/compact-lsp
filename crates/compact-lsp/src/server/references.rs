@@ -314,3 +314,283 @@ impl CompactLanguageServer {
         unique
     }
 }
+
+impl CompactLanguageServer {
+    pub(super) async fn handle_references(
+        &self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri.clone();
+        let uri_string = uri.to_string();
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let content = match self.documents.get(&uri_string) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        // Contract-type circuit references: declaration or `base.circuit(...)`.
+        if let Some((contract_uri, contract, circuit_name)) =
+            self.contract_circuit_target(&uri_string, &content, position.line, position.character)
+        {
+            let locations = self.collect_contract_circuit_refs(
+                &contract_uri,
+                &contract,
+                &circuit_name,
+                include_declaration,
+            );
+            return Ok(if locations.is_empty() {
+                None
+            } else {
+                Some(locations)
+            });
+        }
+
+        // Struct-field / enum-variant references, gated by the owner type.
+        if let Some(target) =
+            self.type_member_target(&uri_string, &content, position.line, position.character)
+        {
+            let locations = self.collect_type_member_refs(&target, include_declaration);
+            return Ok(if locations.is_empty() {
+                None
+            } else {
+                Some(locations)
+            });
+        }
+
+        let symbol_name =
+            match utils::get_word_at_position(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
+
+        let mut all_locations = Vec::new();
+
+        let local_refs = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.find_references(&content, &symbol_name)
+        };
+
+        for r in local_refs {
+            if r.is_definition && !include_declaration {
+                continue;
+            }
+            all_locations.push(Location {
+                uri: uri.clone(),
+                range: r.range,
+            });
+        }
+
+        for entry in self.source_cache.iter() {
+            let file_uri = entry.key();
+            if file_uri == &uri_string {
+                continue;
+            }
+
+            let file_content = entry.value();
+            let search_names = self.get_search_names_for_file(file_uri, &uri_string, &symbol_name);
+
+            for search_name in search_names {
+                let refs = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.find_references(file_content, &search_name)
+                };
+
+                for r in refs {
+                    if r.is_definition {
+                        continue;
+                    }
+                    if let Ok(loc_uri) = file_uri.parse::<lsp_types::Uri>() {
+                        all_locations.push(Location {
+                            uri: loc_uri,
+                            range: r.range,
+                        });
+                    }
+                }
+            }
+        }
+
+        if all_locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(all_locations))
+        }
+    }
+    pub(super) async fn handle_prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri.to_string();
+        let position = params.position;
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let symbol_name =
+            match utils::get_word_at_position(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
+
+        if validation::is_keyword(&symbol_name) || validation::is_builtin_type(&symbol_name) {
+            return Ok(None);
+        }
+
+        let range =
+            match utils::get_word_range_at_position(&content, position.line, position.character) {
+                Some(r) => r,
+                None => return Ok(None),
+            };
+
+        Ok(Some(PrepareRenameResponse::Range(range)))
+    }
+    pub(super) async fn handle_rename(
+        &self,
+        params: RenameParams,
+    ) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri.clone();
+        let uri_string = uri.to_string();
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let content = match self.documents.get(&uri_string) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        let old_name =
+            match utils::get_word_at_position(&content, position.line, position.character) {
+                Some(name) => name,
+                None => return Ok(None),
+            };
+
+        if !validation::is_valid_identifier(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Invalid identifier: must start with letter or underscore",
+            ));
+        }
+
+        if validation::is_keyword(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Cannot rename to a keyword",
+            ));
+        }
+
+        if validation::is_builtin_type(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "Cannot rename to a built-in type name",
+            ));
+        }
+
+        // Contract-type circuit: rename its declaration and `base.circuit(...)` uses.
+        if let Some((contract_uri, contract, circuit_name)) =
+            self.contract_circuit_target(&uri_string, &content, position.line, position.character)
+        {
+            let locations =
+                self.collect_contract_circuit_refs(&contract_uri, &contract, &circuit_name, true);
+            if locations.is_empty() {
+                return Ok(None);
+            }
+            let mut edits: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
+                std::collections::HashMap::new();
+            for loc in locations {
+                edits.entry(loc.uri).or_default().push(TextEdit {
+                    range: loc.range,
+                    new_text: new_name.clone(),
+                });
+            }
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(edits),
+                document_changes: None,
+                change_annotations: None,
+            }));
+        }
+
+        // Struct-field / enum-variant rename, gated by the owner type.
+        if let Some(target) =
+            self.type_member_target(&uri_string, &content, position.line, position.character)
+        {
+            let locations = self.collect_type_member_refs(&target, true);
+            if locations.is_empty() {
+                return Ok(None);
+            }
+            let mut edits: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
+                std::collections::HashMap::new();
+            for loc in locations {
+                edits.entry(loc.uri).or_default().push(TextEdit {
+                    range: loc.range,
+                    new_text: new_name.clone(),
+                });
+            }
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(edits),
+                document_changes: None,
+                change_annotations: None,
+            }));
+        }
+
+        let mut changes: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
+            std::collections::HashMap::new();
+
+        let local_refs = {
+            let mut parser = self.parser_engine.lock().unwrap();
+            parser.find_references(&content, &old_name)
+        };
+
+        for r in local_refs {
+            changes.entry(uri.clone()).or_default().push(TextEdit {
+                range: r.range,
+                new_text: new_name.clone(),
+            });
+        }
+
+        for entry in self.source_cache.iter() {
+            let file_uri = entry.key();
+            if file_uri == &uri_string {
+                continue;
+            }
+
+            let file_content = entry.value();
+            let search_names = self.get_search_names_for_file(file_uri, &uri_string, &old_name);
+
+            for search_name in search_names {
+                let refs = {
+                    let mut parser = self.parser_engine.lock().unwrap();
+                    parser.find_references(file_content, &search_name)
+                };
+
+                let new_name_for_file = if search_name != old_name {
+                    let prefix = &search_name[..search_name.len() - old_name.len()];
+                    format!("{}{}", prefix, new_name)
+                } else {
+                    new_name.clone()
+                };
+
+                for r in refs {
+                    if r.is_definition {
+                        continue;
+                    }
+                    if let Ok(loc_uri) = file_uri.parse::<lsp_types::Uri>() {
+                        changes.entry(loc_uri).or_default().push(TextEdit {
+                            range: r.range,
+                            new_text: new_name_for_file.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if changes.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        }))
+    }
+}
