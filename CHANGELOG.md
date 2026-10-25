@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+- **Modularized the two large source files.** `compact-analyzer`'s `parser/mod.rs` (4714 lines) and
+  `compact-lsp`'s `server/mod.rs` (3746 lines) are now facades over focused submodules; embedded
+  tests moved to sibling `tests.rs` files. No public API or behavior change.
+
 ## [0.6.0] - 2026-10-25
 
 ### Added
