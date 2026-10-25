@@ -425,20 +425,7 @@ impl CompactLanguageServer {
 
         if let Some(mut doc) = self.documents.get_mut(&uri_string) {
             for change in params.content_changes {
-                if let Some(range) = change.range {
-                    let start_line = range.start.line as usize;
-                    let start_char = range.start.character as usize;
-                    let end_line = range.end.line as usize;
-                    let end_char = range.end.character as usize;
-
-                    let start_idx = doc.content.line_to_char(start_line) + start_char;
-                    let end_idx = doc.content.line_to_char(end_line) + end_char;
-
-                    doc.content.remove(start_idx..end_idx);
-                    doc.content.insert(start_idx, &change.text);
-                } else {
-                    doc.content = Rope::from_str(&change.text);
-                }
+                doc.apply_change(change.range.as_ref(), &change.text);
             }
             doc.version = params.text_document.version;
         }

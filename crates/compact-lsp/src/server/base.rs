@@ -196,3 +196,6 @@ pub(super) fn return_type_of_signature(signature: &str) -> Option<String> {
         Some(ret.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests;

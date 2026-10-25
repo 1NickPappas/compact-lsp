@@ -47,3 +47,6 @@ pub fn normalize_path(path: &Path) -> Option<String> {
         normalized.to_str().map(|s| s.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests;

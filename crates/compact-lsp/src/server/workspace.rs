@@ -31,3 +31,6 @@ fn find_compact_files_recursive(dir: &str, files: &mut Vec<String>) -> io::Resul
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
