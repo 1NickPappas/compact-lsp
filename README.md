@@ -36,6 +36,7 @@ Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35
 | **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
 | **Cross-contract calls** | Completion, hover, go-to-definition, signature help, find-references, and rename for `ref.circuit(...)` — reached through struct fields (`w.token.circuit(...)`), call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`), index bases (`items[i].circuit(...)`), fields on a method result (`items.head().value.circuit(...)`), and generic calls/fields (`id(token).circuit(...)`, `Box<Token>.value.circuit(...)`); `contract implements` type completion |
 | **Struct & enum members** | Find References and Rename for struct fields (`w.balance`) and enum variants (`Phase.day`), gated by the owner type (including imported structs/enums) |
+| **Selective imports** | `import { Token, Wallet as W } from "./mod"` binds symbols (including aliases) explicitly, so imported types resolve to the right file instead of the ambiguous by-name workspace scan |
 
 ### Cross-Project Support
 
@@ -89,7 +90,6 @@ reference uses it. `contract implements` requires language 0.26+.
 |------|--------|
 | Code Actions | Not implemented |
 | Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`, `tokens.lookup(k).circuit(...)`), index bases (`items[i].circuit(...)`), and field access on a method result (`items.head().value.circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Generic parameters are instantiated at the call site when an argument's type directly matches the parameter (`id<T>(x: T)` as `id(token)`), and generic struct fields substitute (`Box<Token>.value`); **nested generics** (`id<T>(x: Box<T>)`) and **generic methods** are not inferred |
-| Selective imports | `import { A, B } from "./mod"` has no explicit binding; imported names resolve via the workspace scan by name (ambiguous when several files export the same name) |
 | Range formatting | `format-compact` is whole-document only |
 
 ## Requirements

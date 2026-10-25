@@ -88,6 +88,9 @@ pub struct ImportInfo {
     pub is_file: bool,
     /// The prefix for imported symbols (e.g., "Utils_").
     pub prefix: Option<String>,
+    /// Selective import elements `import { A as B, C } from "./mod"` →
+    /// `[("A", Some("B")), ("C", None)]`. Empty for non-selective imports.
+    pub elements: Vec<(String, Option<String>)>,
 }
 
 /// A syntax error detected by tree-sitter parsing.

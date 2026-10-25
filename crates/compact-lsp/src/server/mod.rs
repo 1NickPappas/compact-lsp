@@ -559,6 +559,24 @@ impl CompactLanguageServer {
                 continue;
             }
 
+            let resolved_uri = match imports::resolve_import_path(current_uri, &import.path) {
+                Some(uri) => uri,
+                None => continue,
+            };
+
+            // Selective import: `import { Sym as Alias } from "./mod"`.
+            // The local name is the alias (or the symbol name when unaliased).
+            for (element, alias) in &import.elements {
+                let bound = alias.as_deref().unwrap_or(element);
+                if bound == name
+                    && let Some(symbols) = self.symbol_cache.get(&resolved_uri)
+                    && let Some(symbol) = symbols.iter().find(|s| s.name == *element)
+                {
+                    return Some((resolved_uri, symbol.clone()));
+                }
+            }
+
+            // Prefix import: `import "./mod" prefix P_`.
             let prefix = match &import.prefix {
                 Some(p) => p,
                 None => continue,
@@ -572,11 +590,6 @@ impl CompactLanguageServer {
             if symbol_name.is_empty() {
                 continue;
             }
-
-            let resolved_uri = match imports::resolve_import_path(current_uri, &import.path) {
-                Some(uri) => uri,
-                None => continue,
-            };
 
             if let Some(symbols) = self.symbol_cache.get(&resolved_uri) {
                 for symbol in symbols.iter() {
@@ -1291,6 +1304,12 @@ impl CompactLanguageServer {
             if let Some(resolved) = imports::resolve_import_path(searching_file, &import.path)
                 && resolved == defining_file
             {
+                // Selective imports may bind the symbol under an alias.
+                for (element, alias) in &import.elements {
+                    if element == symbol_name {
+                        names.push(alias.clone().unwrap_or_else(|| element.clone()));
+                    }
+                }
                 let prefixed_name = match &import.prefix {
                     Some(prefix) => format!("{}{}", prefix, symbol_name),
                     None => symbol_name.to_string(),
@@ -1718,7 +1737,15 @@ impl LanguageServer for CompactLanguageServer {
                 let prefix = import.prefix.as_deref().unwrap_or("");
 
                 for sym in entry.value().iter() {
-                    let prefixed_name = if prefix.is_empty() {
+                    // Selective imports expose only the listed symbols, under
+                    // their alias when one is given.
+                    let prefixed_name = if !import.elements.is_empty() {
+                        match import.elements.iter().find(|(e, _)| e == &sym.name) {
+                            Some((_, Some(alias))) => alias.clone(),
+                            Some((e, None)) => e.clone(),
+                            None => continue,
+                        }
+                    } else if prefix.is_empty() {
                         sym.name.clone()
                     } else {
                         format!("{}{}", prefix, sym.name)

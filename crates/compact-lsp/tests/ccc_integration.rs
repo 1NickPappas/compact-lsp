@@ -1497,3 +1497,94 @@ circuit useIt(p: P_Phase): Boolean {
 
     client.shutdown();
 }
+
+/// Selective import binding with an alias: `import { Token as T } from "./token"`
+/// resolves `T` to the imported `Token` contract type. The workspace scan cannot
+/// resolve the bare alias `T`, so this exercises selective binding specifically.
+#[test]
+fn test_selective_import_contract_alias() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token_src = r#"
+export contract Token {
+    circuit transfer(to: Address, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: Address): Uint<64>;
+}
+"#;
+    let main_src = r#"
+import { Token as T } from "./token";
+
+circuit useIt(t: T): Boolean {
+    return t.transfer(0, 1);
+}
+"#;
+
+    let token_file = dir.path().join("token.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&token_file, token_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let token_uri = format!("file://{}", token_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &token_uri, token_src);
+    open(&mut client, &main_uri, main_src);
+
+    assert_member_features(&mut client, &main_uri, main_src, 4, "token.compact", 2);
+    client.shutdown();
+}
+
+/// Selective import binding for a struct under an alias, then a field reference
+/// through that aliased type: `import { Wallet as W } from "./wallet"` + `w.balance`.
+#[test]
+fn test_selective_import_struct_alias_field() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wallet_src = r#"
+export struct Wallet {
+    balance: Uint<64>,
+}
+"#;
+    let main_src = r#"
+import { Wallet as W } from "./wallet";
+
+circuit useIt(w: W): Uint<64> {
+    const x = w.balance;
+    return w.balance + x;
+}
+"#;
+
+    let wallet_file = dir.path().join("wallet.compact");
+    let main_file = dir.path().join("caller.compact");
+    std::fs::write(&wallet_file, wallet_src).unwrap();
+    std::fs::write(&main_file, main_src).unwrap();
+
+    let wallet_uri = format!("file://{}", wallet_file.display());
+    let main_uri = format!("file://{}", main_file.display());
+
+    let mut client = LspClient::start();
+    initialize(&mut client, &format!("file://{}", dir.path().display()));
+    open(&mut client, &wallet_uri, wallet_src);
+    open(&mut client, &main_uri, main_src);
+
+    let refs = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": wallet_uri },
+            "position": { "line": 2, "character": 5 },
+            "context": { "includeDeclaration": true }
+        }),
+    );
+    let pairs = location_pairs(&refs);
+    assert_eq!(pairs.len(), 3, "expected def + 2 uses: {refs}");
+    assert!(
+        pairs
+            .iter()
+            .filter(|(u, _)| u.contains("caller.compact"))
+            .count()
+            == 2,
+        "expected 2 caller uses: {refs}"
+    );
+
+    client.shutdown();
+}

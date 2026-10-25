@@ -1834,10 +1834,27 @@ impl ParserEngine {
             .and_then(|prefix_node| prefix_node.child_by_field_name("id"))
             .map(|id_node| self.node_text(id_node, source));
 
+        // Selective elements: `import { A as B, C } from …`.
+        let mut elements = Vec::new();
+        if let Some(selection) = node.child_by_field_name("selection") {
+            let mut cursor = selection.walk();
+            for element in selection.children_by_field_name("element", &mut cursor) {
+                let Some(id) = element.child_by_field_name("id") else {
+                    continue;
+                };
+                let name = self.node_text(id, source);
+                let alias = element
+                    .child_by_field_name("alias")
+                    .map(|a| self.node_text(a, source));
+                elements.push((name, alias));
+            }
+        }
+
         Some(ImportInfo {
             path,
             is_file,
             prefix,
+            elements,
         })
     }
 
@@ -3079,6 +3096,31 @@ circuit main(): Field {
         let no_prefix = no_prefix.unwrap();
         assert!(no_prefix.is_file, "Should be a file import");
         assert!(no_prefix.prefix.is_none(), "Should have no prefix");
+    }
+
+    #[test]
+    fn test_get_imports_selective() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+import { Token, Wallet as W } from "./mod";
+import { A } from "./other";
+"#;
+        let imports = parser.get_imports(source);
+        assert_eq!(imports.len(), 2);
+
+        let first = imports.iter().find(|i| i.path == "./mod").unwrap();
+        assert!(first.is_file);
+        assert!(first.prefix.is_none());
+        assert_eq!(
+            first.elements,
+            vec![
+                ("Token".to_string(), None),
+                ("Wallet".to_string(), Some("W".to_string())),
+            ]
+        );
+
+        let second = imports.iter().find(|i| i.path == "./other").unwrap();
+        assert_eq!(second.elements, vec![("A".to_string(), None)]);
     }
 
     #[test]
