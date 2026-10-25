@@ -34,7 +34,7 @@ Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35
 | **Folding Ranges** | Code folding for blocks and functions |
 | **Cross-file Errors** | Errors propagate to dependent files on save |
 | **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
-| **Cross-contract calls** | Completion, hover, go-to-definition, signature help, find-references, and rename for `ref.circuit(...)` — reached through struct fields (`w.token.circuit(...)`), call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`), index bases (`items[i].circuit(...)`), fields on a method result (`items.head().value.circuit(...)`), and generic calls/fields (`id(token).circuit(...)`, `Box<Token>.value.circuit(...)`); `contract implements` type completion |
+| **Cross-contract calls** | Completion, hover, go-to-definition, signature help, find-references, and rename for `ref.circuit(...)` — reached through struct fields (`w.token.circuit(...)`), call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`), index bases (`items[i].circuit(...)`), fields on a method result (`items.head().value.circuit(...)`), and generic calls/fields (`pick<T_Token>(m).circuit(...)`, `Box<Token>.value.circuit(...)`); `contract implements` type completion |
 | **Struct & enum members** | Find References and Rename for struct fields (`w.balance`) and enum variants (`Phase.day`), gated by the owner type (including imported structs/enums) |
 | **Selective imports** | `import { Token, Wallet as W } from "./mod"` binds symbols (including aliases) explicitly, so imported types resolve to the right file instead of the ambiguous by-name workspace scan |
 
@@ -79,17 +79,25 @@ receiver first, then the method's return type — a contract circuit's declared 
 (`factory.create().transfer(...)`) or a built-in method's return with generics substituted
 (`tokens.lookup(k).transfer(...)`, where `Map.lookup` returns `V`). Fields on a method result also
 resolve (`items.head().value.transfer(...)`: `List<T>.head()` → `Maybe<T>`, whose `value` field is
-`T`). Generic parameters are instantiated at the call site (`circuit id<T>(x: T): T` used as
-`id(token)` resolves to `token`'s type) and generic struct fields substitute (`Box<Token>.value` →
-`Token`). Find-references and rename follow a circuit across every file where a contract-typed
-reference uses it. `contract implements` requires language 0.26+.
+`T`). Generic parameters are read from explicit call-site type arguments
+(`circuit pick<T>(m: Maybe<T>): T` used as `pick<T_Token>(m)` resolves to `T_Token`) and, as a
+superset of the compiler, inferred when an argument's type directly matches the parameter
+(`circuit id<T>(x: T): T` used as `id(token)` resolves to `token`'s type); generic struct fields
+substitute (`Box<Token>.value` → `Token`). Find-references and rename follow a circuit across every
+file where a contract-typed reference uses it. `contract implements` requires language 0.26+.
+
+> **Note on generics.** Compact only supports type parameters on *declarations* — `struct`, `type`
+> aliases, top-level `circuit` (functions), `witness`, and `module`. Contracts, contract circuits,
+> and member (`.method`) calls cannot be generic, so there is no such thing as a generic "method" in
+> the language. Generic calls *require* explicit type arguments (`id<Uint<64>>(x)`); the compiler
+> does not infer them.
 
 ### Known Limitations
 
 | Area | Status |
 |------|--------|
 | Code Actions | Not implemented |
-| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`, `tokens.lookup(k).circuit(...)`), index bases (`items[i].circuit(...)`), and field access on a method result (`items.head().value.circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Generic parameters are instantiated at the call site when an argument's type directly matches the parameter (`id<T>(x: T)` as `id(token)`), and generic struct fields substitute (`Box<Token>.value`); **nested generics** (`id<T>(x: Box<T>)`) and **generic methods** are not inferred |
+| Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`, `tokens.lookup(k).circuit(...)`), index bases (`items[i].circuit(...)`), and field access on a method result (`items.head().value.circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Generic parameters come from explicit call-site type arguments (`first<Uint<64>>(m)`) or, as a superset of the compiler, from an argument whose type directly matches the parameter (`id<T>(x: T)` as `id(token)`), and generic struct fields substitute (`Box<Token>.value`); generic *methods* are not a Compact construct |
 | Range formatting | `format-compact` is whole-document only |
 
 ## Requirements

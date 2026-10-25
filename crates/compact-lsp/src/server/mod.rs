@@ -724,6 +724,7 @@ impl CompactLanguageServer {
         content: &str,
         callee: &str,
         args: &[MemberBase],
+        explicit: &[String],
     ) -> Option<(String, String)> {
         let (callee_uri, callee_symbol) = self.find_symbol_anywhere(uri, callee)?;
         let callee_content = self.source_for(&callee_uri)?;
@@ -735,19 +736,39 @@ impl CompactLanguageServer {
         if signature.generic_params.is_empty() {
             return Some((return_type, callee_uri));
         }
-        // Infer each generic parameter from an argument whose declared parameter
-        // type is exactly that parameter (`circuit id<T>(x: T)` + `id(token)`).
         let params = builtins::parse_type_params(&signature.generic_params);
         let mut type_args: Vec<String> = params.iter().map(|p| p.to_string()).collect();
+        let mut bound = vec![false; params.len()];
+        // 1. Explicit type arguments (`first<Uint<64>>(m)`) bind in order. Compact
+        //    requires these for generic calls, and they cover parameters that
+        //    can't be inferred from arguments (`none<T>()`, `Maybe<T>` params).
+        //    They are written in the caller's scope, so the result is resolved
+        //    there (handled by returning `uri` when anything was substituted).
+        for (i, ta) in explicit.iter().enumerate() {
+            if i >= params.len() {
+                break;
+            }
+            let ta = ta.trim();
+            if !ta.is_empty() {
+                type_args[i] = ta.to_string();
+                bound[i] = true;
+            }
+        }
+        // 2. Infer any remaining parameter from an argument whose declared
+        //    parameter type is exactly that parameter (`circuit id<T>(x: T)` +
+        //    `id(token)`). This is a superset of the compiler, which requires
+        //    explicit arguments, but keeps existing call sites working.
         for (i, param_type) in signature.param_types.iter().enumerate() {
             let param_type = param_type.trim();
             if let Some(idx) = params.iter().position(|p| *p == param_type)
+                && !bound[idx]
                 && let Some(Some(actual)) = args.get(i).map(|arg| {
                     self.resolve_base_raw_type(uri, content, arg)
                         .map(|(t, _)| t)
                 })
             {
                 type_args[idx] = actual;
+                bound[idx] = true;
             }
         }
         let instantiated = builtins::substitute_generic_params(
@@ -755,7 +776,14 @@ impl CompactLanguageServer {
             &signature.generic_params,
             &type_args,
         );
-        Some((instantiated, callee_uri))
+        // Substituted text was authored in the caller's file; only an
+        // unsubstituted return type belongs to the callee's scope.
+        let scope = if bound.iter().any(|b| *b) {
+            uri.to_string()
+        } else {
+            callee_uri
+        };
+        Some((instantiated, scope))
     }
 
     /// Resolve a member-access base to its declared type text and the file scope
@@ -795,9 +823,11 @@ impl CompactLanguageServer {
                 }
                 Some((raw, scope_uri))
             }
-            MemberBase::Call { callee, args } => {
-                self.resolve_call_raw_type(uri, content, callee, args)
-            }
+            MemberBase::Call {
+                callee,
+                args,
+                type_args,
+            } => self.resolve_call_raw_type(uri, content, callee, args, type_args),
             MemberBase::MethodCall(receiver, method) => {
                 let (recv_raw, scope_uri) = self.resolve_base_raw_type(uri, content, receiver)?;
                 let head = builtins::extract_base_type(&recv_raw).trim();
@@ -3062,6 +3092,60 @@ struct MemberTarget {
     kind: TypeMemberKind,
 }
 
+/// Split a callable text into its name and explicit type arguments:
+/// `id<Uint<64>>` → `("id", ["Uint<64>"])`, `make` → `("make", [])`.
+fn split_callable_type_args(text: &str) -> (&str, Vec<String>) {
+    let text = text.trim();
+    if let Some(lt) = text.find('<') {
+        let rest = &text[lt..];
+        let mut depth = 0i32;
+        for (i, c) in rest.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Only a suffix that is entirely `<…>` is a type list.
+                        if lt + i + 1 == text.len() {
+                            return (text[..lt].trim(), split_type_args(&rest[1..i]));
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (text, Vec::new())
+}
+
+/// Split a type-argument list (`Uint<64>, Maybe<Address>`) on top-level commas,
+/// tracking `<`/`(`/`[` nesting so a comma inside a type doesn't split.
+fn split_type_args(text: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let piece = text[start..i].trim();
+                if !piece.is_empty() {
+                    args.push(piece.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let piece = text[start..].trim();
+    if !piece.is_empty() {
+        args.push(piece.to_string());
+    }
+    args
+}
+
 /// Parse a text-extracted base (`w.token`, `make()`, `items[0]`,
 /// `factory.create()`, `items[0].get()`) into a [`MemberBase`] for completion,
 /// where the AST is not available. Peels from the outside in (trailing call,
@@ -3071,12 +3155,13 @@ fn parse_base_text(text: &str) -> MemberBase {
     if text.is_empty() {
         return MemberBase::Other;
     }
-    // Trailing call: `receiver.method(...)` or `callee(...)`.
+    // Trailing call: `receiver.method(...)` or `callee<T>(...)`.
     if text.ends_with(')')
         && let Some(open) = matching_open(text, '(', ')')
     {
-        let callee = text[..open].trim();
+        let callable = text[..open].trim();
         let args = split_top_level_args(&text[open + 1..text.len() - 1]);
+        let (callee, type_args) = split_callable_type_args(callable);
         return match callee.rsplit_once('.') {
             Some((receiver, method)) if !receiver.is_empty() && !method.is_empty() => {
                 MemberBase::MethodCall(Box::new(parse_base_text(receiver)), method.to_string())
@@ -3084,6 +3169,7 @@ fn parse_base_text(text: &str) -> MemberBase {
             _ if !callee.is_empty() => MemberBase::Call {
                 callee: callee.to_string(),
                 args,
+                type_args,
             },
             _ => MemberBase::Other,
         };

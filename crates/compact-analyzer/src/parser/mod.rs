@@ -1981,18 +1981,35 @@ impl ParserEngine {
                 }
             }
             "function_call_term" => {
-                let callee = node
-                    .child_by_field_name("fun")
+                let fun = node.child_by_field_name("fun");
+                let callee = fun
                     .and_then(|fun| fun.child_by_field_name("id"))
                     .map(|id| self.node_text(id, source));
                 match callee {
                     Some(callee) => {
+                        // Explicit type arguments: `id<Uint<64>>(x)`. Compact
+                        // requires these for generic calls, so read them rather
+                        // than relying solely on argument inference.
+                        let type_args = fun
+                            .and_then(|fun| fun.child_by_field_name("gargs"))
+                            .map(|gargs| {
+                                let mut cursor = gargs.walk();
+                                gargs
+                                    .children_by_field_name("garg", &mut cursor)
+                                    .map(|garg| self.node_text(garg, source).trim().to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
                         let mut args = Vec::new();
                         let mut cursor = node.walk();
                         for arg in node.children_by_field_name("expr", &mut cursor) {
                             args.push(self.member_base(arg, source));
                         }
-                        MemberBase::Call { callee, args }
+                        MemberBase::Call {
+                            callee,
+                            args,
+                            type_args,
+                        }
                     }
                     None => MemberBase::Other,
                 }
@@ -3607,6 +3624,7 @@ circuit useIndex(): Boolean {
             MemberBase::Call {
                 callee: "make".to_string(),
                 args: vec![],
+                type_args: vec![],
             }
         );
         assert_eq!(ctx.member_name, "transfer");
@@ -3716,9 +3734,35 @@ circuit useIt(token: Token): Boolean {
             MemberBase::Call {
                 callee: "id".to_string(),
                 args: vec![MemberBase::Path(vec!["token".to_string()])],
+                type_args: vec![],
             }
         );
         assert_eq!(ctx.base_name, "id()");
+    }
+
+    #[test]
+    fn test_member_base_call_type_args() {
+        let mut parser = ParserEngine::new();
+        let source = r#"
+circuit id<T>(x: T): T { return x; }
+circuit useIt(token: Token): Boolean {
+    return id<Uint<64>>(token).transfer(0);
+}
+"#;
+        let line = 3;
+        let text = source.lines().nth(line as usize).unwrap();
+        let col = text.find("transfer").unwrap() as u32 + 1;
+        let ctx = parser
+            .get_member_access_context(source, line, col)
+            .expect("turbofish base");
+        assert_eq!(
+            ctx.base,
+            MemberBase::Call {
+                callee: "id".to_string(),
+                args: vec![MemberBase::Path(vec!["token".to_string()])],
+                type_args: vec!["Uint<64>".to_string()],
+            }
+        );
     }
 
     #[test]

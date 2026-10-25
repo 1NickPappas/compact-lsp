@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Find References and Rename for struct fields and enum variants** (`w.balance`, `Phase.day`),
   gated by the owner type (including imported structs/enums) so unrelated members that share a name
   are never touched.
+- **Explicit call-site type arguments**: generic calls written as `id<Uint<64>>(x)` (the form
+  Compact *requires* — it does not infer generic arguments) now bind the type parameters directly,
+  covering parameters that argument inference cannot bind: nested (`first<T>(m: Maybe<T>)`) and
+  return-only (`none<T>()`). Argument-based inference is kept as a permissive superset.
 - **Selective-import binding**: `import { Token, Wallet as W } from "./mod"` files are parsed into
   their elements, so imported symbols (including aliases) resolve explicitly to the imported file
   rather than via the ambiguous by-name workspace scan, and completion offers exactly the selected

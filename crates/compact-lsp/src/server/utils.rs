@@ -274,12 +274,13 @@ pub fn detect_dot_context(content: &str, line: u32, character: u32) -> Option<St
     }
 
     // Scan backwards from before the dot over an expression base
-    // (`w.token` → "w.token", `make()` → "make()", `items[0]` → "items[0]").
+    // (`w.token` → "w.token", `make()` → "make()", `items[0]` → "items[0]",
+    // `id<T>()` → "id<T>()").
     let end = dot_idx;
     let mut start = end;
     while start > 0 {
         let c = *chars.get(start - 1)?;
-        if c.is_alphanumeric() || matches!(c, '_' | '.' | '(' | ')' | '[' | ']') {
+        if c.is_alphanumeric() || matches!(c, '_' | '.' | '(' | ')' | '[' | ']' | '<' | '>') {
             start -= 1;
         } else {
             break;
@@ -320,12 +321,13 @@ pub fn get_dot_access_variable(content: &str, line: u32, character: u32) -> Opti
     }
 
     // Scan backwards from before the dot over an expression base
-    // (`w.token.` → "w.token", `make().` → "make()", `items[0].` → "items[0]").
+    // (`w.token.` → "w.token", `make().` → "make()", `items[0].` → "items[0]",
+    // `id<T>().` → "id<T>()").
     let end = dot_idx;
     let mut start = end;
     while start > 0 {
         let c = *chars.get(start - 1)?;
-        if c.is_alphanumeric() || matches!(c, '_' | '.' | '(' | ')' | '[' | ']') {
+        if c.is_alphanumeric() || matches!(c, '_' | '.' | '(' | ')' | '[' | ']' | '<' | '>') {
             start -= 1;
         } else {
             break;

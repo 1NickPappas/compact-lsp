@@ -146,11 +146,13 @@ pub enum SemanticTokenModifier {
 pub enum MemberBase {
     /// A dotted identifier path, root first (`w.token` → ["w", "token"]).
     Path(Vec<String>),
-    /// A call to a circuit/function (`make()`, `id(token)`), carrying the
-    /// argument expressions for generic inference at the call site.
+    /// A call to a circuit/function (`make()`, `id<Uint<64>>(token)`),
+    /// carrying the argument expressions and any explicit type arguments
+    /// written between `<` and `>` (`id<Uint<64>>` → `["Uint<64>"]`).
     Call {
         callee: String,
         args: Vec<MemberBase>,
+        type_args: Vec<String>,
     },
     /// A method call on a receiver (`factory.create()`, `map.lookup(k)`).
     MethodCall(Box<MemberBase>, String),
