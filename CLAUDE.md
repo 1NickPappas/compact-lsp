@@ -77,7 +77,7 @@ The analysis layer, independent of the LSP protocol. Exposes three engines via `
 
 `main.rs` sets up `tracing` (stderr) and runs the `tower-lsp` server over stdin/stdout. All logic lives in `server/`:
 
-- **`mod.rs`** — `CompactLanguageServer` holds all engines (wrapped in `Arc`; `ParserEngine` in `Arc<Mutex<>>`) and several `DashMap` caches. It implements the `tower_lsp::LanguageServer` trait (`initialize`, `did_open/change/save/close`, `completion`, `hover`, `goto_definition`, `references`, `rename`, `signature_help`, `semantic_tokens_full`, `formatting`, `document_symbol`, `folding_range`, `symbol` (workspace symbols), etc.).
+- **`mod.rs`** — `CompactLanguageServer` holds all engines (wrapped in `Arc`; `ParserEngine` in `Arc<Mutex<>>`) and several `DashMap` caches. It implements the `tower_lsp::LanguageServer` trait (`initialize`, `did_open/change/save/close`, `completion`, `hover`, `goto_definition`, `references`, `rename`, `signature_help`, `semantic_tokens_full`, `formatting`, `range_formatting`, `document_symbol`, `folding_range`, `symbol` (workspace symbols), etc.). `range_formatting` formats the whole document (the only mode `format-compact` has), diffs it against the original at line granularity (`line_edits`/`range_format_edits`), and returns only the edits intersecting the selected range.
 - **`state.rs`** — `Document` (content as a `ropey::Rope` for efficient incremental edits + version).
 - **`utils.rs`** — text/position helpers (e.g. word-at-position).
 - **`validation.rs`** — hardcoded keyword / built-in-type / identifier checks.

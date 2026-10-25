@@ -1667,3 +1667,28 @@ circuit useIt(): Boolean {
     assert_member_features(&mut client, &main_uri, main_src, 6, "token.compact", 2);
     client.shutdown();
 }
+
+/// The server advertises range formatting support. Deterministic — it does not
+/// depend on `format-compact` being installed (the edit logic is unit-tested).
+#[test]
+fn test_range_formatting_capability() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut client = LspClient::start();
+    let init = client.request(
+        "initialize",
+        json!({
+            "processId": null,
+            "rootUri": format!("file://{}", dir.path().display()),
+            "capabilities": {}
+        }),
+    );
+    let supported = init
+        .pointer("/result/capabilities/documentRangeFormattingProvider")
+        .and_then(|v| v.as_bool());
+    assert_eq!(
+        supported,
+        Some(true),
+        "range formatting not advertised: {init}"
+    );
+    client.shutdown();
+}

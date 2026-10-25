@@ -1401,6 +1401,7 @@ impl LanguageServer for CompactLanguageServer {
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
@@ -2223,6 +2224,41 @@ impl LanguageServer for CompactLanguageServer {
             range,
             new_text: formatted,
         }]))
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri.to_string();
+
+        let content = match self.documents.get(&uri) {
+            Some(doc) => doc.content.to_string(),
+            None => return Ok(None),
+        };
+
+        // `format-compact` only formats whole files, so format everything and
+        // keep only the changes that intersect the requested range.
+        let formatted = match self.formatter_engine.format(&content).await {
+            Ok(formatted) => formatted,
+            Err(e) => {
+                self.client
+                    .show_message(MessageType::ERROR, format!("Formatting failed: {}", e))
+                    .await;
+                return Ok(None);
+            }
+        };
+
+        if formatted == content {
+            return Ok(Some(vec![]));
+        }
+
+        Ok(Some(range_format_edits(
+            &content,
+            &formatted,
+            params.range.start.line,
+            params.range.end.line,
+        )))
     }
 
     async fn document_symbol(
@@ -3092,6 +3128,161 @@ struct MemberTarget {
     kind: TypeMemberKind,
 }
 
+/// A line-range replacement: original lines `[start, end)` become `replacement`.
+struct LineEdit {
+    start: usize,
+    end: usize,
+    replacement: Vec<String>,
+}
+
+/// Compute line-level, minimal edits that turn `original` into `formatted`.
+///
+/// Uses an LCS alignment over lines (with common prefix/suffix trimming), so
+/// every `LineEdit` replaces one contiguous run of original lines and inserts
+/// the corresponding formatted lines. The edits are independent and in
+/// increasing order, so any subset of them yields a valid document.
+fn line_edits(original: &[&str], formatted: &[&str]) -> Vec<LineEdit> {
+    // Trim the common prefix and suffix so the LCS operates on just the change.
+    let mut prefix = 0;
+    while prefix < original.len()
+        && prefix < formatted.len()
+        && original[prefix] == formatted[prefix]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < original.len() - prefix
+        && suffix < formatted.len() - prefix
+        && original[original.len() - 1 - suffix] == formatted[formatted.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let a = &original[prefix..original.len() - suffix];
+    let b = &formatted[prefix..formatted.len() - suffix];
+    if a.is_empty() && b.is_empty() {
+        return Vec::new();
+    }
+
+    // Guard against pathological inputs: collapse to one block replacement.
+    if a.len().saturating_mul(b.len()) > 4_000_000 {
+        return vec![LineEdit {
+            start: prefix,
+            end: prefix + a.len(),
+            replacement: b.iter().map(|s| s.to_string()).collect(),
+        }];
+    }
+
+    let n = a.len();
+    let m = b.len();
+    // dp[i][j] = LCS length of a[i..] and b[j..].
+    let mut dp = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if a[i] == b[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+
+    // Back-track, grouping each run of non-equal lines into one edit.
+    let mut edits: Vec<LineEdit> = Vec::new();
+    let mut orig_pos = 0usize;
+    let (mut i, mut j) = (0usize, 0usize);
+    let mut run_start: Option<usize> = None;
+    let mut repl: Vec<String> = Vec::new();
+
+    while i < n && j < m {
+        if a[i] == b[j] {
+            if let Some(s) = run_start.take() {
+                edits.push(LineEdit {
+                    start: s,
+                    end: prefix + orig_pos,
+                    replacement: std::mem::take(&mut repl),
+                });
+            }
+            i += 1;
+            j += 1;
+            orig_pos += 1;
+        } else {
+            run_start.get_or_insert(prefix + orig_pos);
+            if dp[i + 1][j] >= dp[i][j + 1] {
+                i += 1;
+                orig_pos += 1;
+            } else {
+                repl.push(b[j].to_string());
+                j += 1;
+            }
+        }
+    }
+    if run_start.is_none() && (i < n || j < m) {
+        run_start = Some(prefix + orig_pos);
+    }
+    while i < n {
+        i += 1;
+        orig_pos += 1;
+    }
+    while j < m {
+        repl.push(b[j].to_string());
+        j += 1;
+    }
+    if let Some(s) = run_start.take() {
+        edits.push(LineEdit {
+            start: s,
+            end: prefix + orig_pos,
+            replacement: repl,
+        });
+    }
+    edits
+}
+
+/// Whole-file formatting edits filtered to those intersecting the selected
+/// inclusive line range `[sel_start, sel_end]`. Newlines are re-added because
+/// each [`TextEdit`] spans whole lines (start/end at column 0).
+fn range_format_edits(
+    original: &str,
+    formatted: &str,
+    sel_start: u32,
+    sel_end: u32,
+) -> Vec<TextEdit> {
+    let orig: Vec<&str> = original.split('\n').collect();
+    let fmt: Vec<&str> = formatted.split('\n').collect();
+
+    let mut edits = Vec::new();
+    for edit in line_edits(&orig, &fmt) {
+        let overlaps = if edit.start == edit.end {
+            // Pure insertion anchored between lines: include it when the
+            // anchor line is within the selection.
+            edit.start as u32 >= sel_start && edit.start as u32 <= sel_end
+        } else {
+            edit.start as u32 <= sel_end && (edit.end as u32 - 1) >= sel_start
+        };
+        if !overlaps {
+            continue;
+        }
+        let new_text = if edit.replacement.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", edit.replacement.join("\n"))
+        };
+        edits.push(TextEdit {
+            range: Range {
+                start: Position {
+                    line: edit.start as u32,
+                    character: 0,
+                },
+                end: Position {
+                    line: edit.end as u32,
+                    character: 0,
+                },
+            },
+            new_text,
+        });
+    }
+    edits
+}
+
 /// Split a callable text into its name and explicit type arguments:
 /// `id<Uint<64>>` → `("id", ["Uint<64>"])`, `make` → `("make", [])`.
 fn split_callable_type_args(text: &str) -> (&str, Vec<String>) {
@@ -3484,5 +3675,72 @@ mod tests {
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0].0, "addFunds");
         assert_eq!(mapped[0].1, SymbolKind::FUNCTION);
+    }
+
+    /// Apply line-level edits (to verify a diff reconstructs its target).
+    fn apply_line_edits(original: &str, edits: &[LineEdit]) -> String {
+        let mut lines: Vec<String> = original.split('\n').map(str::to_string).collect();
+        for e in edits.iter().rev() {
+            lines.splice(e.start..e.end, e.replacement.clone());
+        }
+        lines.join("\n")
+    }
+
+    /// Apply LSP text edits (to verify range-formatting output).
+    fn apply_text_edits(original: &str, edits: &[TextEdit]) -> String {
+        let mut lines: Vec<String> = original.split('\n').map(str::to_string).collect();
+        for e in edits.iter().rev() {
+            let repl: Vec<String> = if e.new_text.is_empty() {
+                Vec::new()
+            } else {
+                e.new_text
+                    .strip_suffix('\n')
+                    .unwrap_or(&e.new_text)
+                    .split('\n')
+                    .map(str::to_string)
+                    .collect()
+            };
+            lines.splice(e.range.start.line as usize..e.range.end.line as usize, repl);
+        }
+        lines.join("\n")
+    }
+
+    const ORIGINAL: &str =
+        "circuit a(): Field {\n      return   1;\n}\ncircuit b():Field{return 2;}\n";
+    const FORMATTED: &str =
+        "circuit a(): Field {\n  return 1;\n}\n\ncircuit b(): Field {\n  return 2;\n}\n";
+
+    #[test]
+    fn test_line_edits_roundtrip() {
+        let orig: Vec<&str> = ORIGINAL.split('\n').collect();
+        let fmt: Vec<&str> = FORMATTED.split('\n').collect();
+        let edits = line_edits(&orig, &fmt);
+        assert!(!edits.is_empty());
+        assert_eq!(apply_line_edits(ORIGINAL, &edits), FORMATTED);
+    }
+
+    #[test]
+    fn test_range_format_edits_full_selection_matches_formatted() {
+        let edits = range_format_edits(ORIGINAL, FORMATTED, 0, u32::MAX);
+        assert_eq!(apply_text_edits(ORIGINAL, &edits), FORMATTED);
+    }
+
+    #[test]
+    fn test_range_format_edits_narrow_selection() {
+        // Only line 1 (the `return 1;` line) is selected: the second circuit
+        // must be left exactly as it was.
+        let edits = range_format_edits(ORIGINAL, FORMATTED, 1, 1);
+        assert_eq!(edits.len(), 1, "expected a single in-range edit: {edits:?}");
+        assert_eq!(
+            apply_text_edits(ORIGINAL, &edits),
+            "circuit a(): Field {\n  return 1;\n}\ncircuit b():Field{return 2;}\n"
+        );
+    }
+
+    #[test]
+    fn test_range_format_edits_outside_changes_is_empty() {
+        // Line 0 is unchanged, so there is nothing to do.
+        let edits = range_format_edits(ORIGINAL, FORMATTED, 0, 0);
+        assert!(edits.is_empty(), "unexpected edits: {edits:?}");
     }
 }

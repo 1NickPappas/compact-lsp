@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Find References and Rename for struct fields and enum variants** (`w.balance`, `Phase.day`),
   gated by the owner type (including imported structs/enums) so unrelated members that share a name
   are never touched.
+- **Range (selection) formatting**: `textDocument/rangeFormatting` is now supported. Since
+  `format-compact` only formats whole files, the document is formatted in full and a line-level diff
+  is filtered to the changes intersecting the selected range, so unselected code is untouched.
 - **Explicit call-site type arguments**: generic calls written as `id<Uint<64>>(x)` (the form
   Compact *requires* — it does not infer generic arguments) now bind the type parameters directly,
   covering parameters that argument inference cannot bind: nested (`first<T>(m: Maybe<T>)`) and

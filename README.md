@@ -30,7 +30,7 @@ Mainnet / Preprod / Preview pin is **0.31.1 (language 0.23.0)**; 0.34.0 and 0.35
 | **Rename** | Rename symbols across the workspace |
 | **Signature Help** | Parameter hints while typing function calls |
 | **Document Symbols** | Outline view (circuits, structs, enums, modules) |
-| **Formatting** | Code formatting via `format-compact` |
+| **Formatting** | Whole-document and range (selection) formatting via `format-compact` |
 | **Folding Ranges** | Code folding for blocks and functions |
 | **Cross-file Errors** | Errors propagate to dependent files on save |
 | **Version-aware symbols** | Registry suggestions follow the detected compiler's language version |
@@ -98,7 +98,6 @@ file where a contract-typed reference uses it. `contract implements` requires la
 |------|--------|
 | Code Actions | Not implemented |
 | Contract-reference typing | Heuristic, not a type system: resolves `parg` / `const` / `ledger` annotations, follows `type X = Y` aliases, walks struct fields (`w.token.circuit(...)`), resolves call bases (`make().circuit(...)`), method-call bases (`factory.create().circuit(...)`, `tokens.lookup(k).circuit(...)`), index bases (`items[i].circuit(...)`), and field access on a method result (`items.head().value.circuit(...)`), and infers `const t = make();` from the callee's declared return type (same file, or an imported/workspace callee resolved in its own file scope). Generic parameters come from explicit call-site type arguments (`first<Uint<64>>(m)`) or, as a superset of the compiler, from an argument whose type directly matches the parameter (`id<T>(x: T)` as `id(token)`), and generic struct fields substitute (`Box<Token>.value`); generic *methods* are not a Compact construct |
-| Range formatting | `format-compact` is whole-document only |
 
 ## Requirements
 
