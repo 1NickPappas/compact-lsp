@@ -14,7 +14,7 @@
 
 mod common;
 
-use common::{LspClient, initialize, open, require_compiler};
+use common::{LspClient, initialize, open_and_wait, require_compiler};
 use compact_analyzer::{DiagnosticEngine, LanguageVersion};
 use serde_json::{Value, json};
 
@@ -81,7 +81,7 @@ async fn test_registry_gating_matches_detected_language() {
 
     let mut client = LspClient::start();
     initialize(&mut client, &format!("file://{}", temp.path().display()));
-    open(&mut client, &uri, PROBE);
+    open_and_wait(&mut client, &uri, PROBE);
 
     // General completion inside the circuit body lists stdlib circuits.
     let general = completion(&mut client, &uri, 3, 9, " ");

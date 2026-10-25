@@ -1,0 +1,20 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: "response.get(\"result\")"
+---
+{
+  "contents": {
+    "kind": "markdown",
+    "value": "```compact\ncircuit mintTokens(amount: Uint<16>): []\n```\n\nCircuit function"
+  },
+  "range": {
+    "end": {
+      "character": 1,
+      "line": 27
+    },
+    "start": {
+      "character": 0,
+      "line": 25
+    }
+  }
+}

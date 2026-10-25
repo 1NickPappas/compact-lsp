@@ -1,0 +1,272 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: decode_semantic_tokens(&response)
+---
+[
+  {
+    "character": 12,
+    "length": 11,
+    "line": 3,
+    "modifiers": 1,
+    "tokenType": 3
+  },
+  {
+    "character": 2,
+    "length": 6,
+    "line": 4,
+    "modifiers": 1,
+    "tokenType": 4
+  },
+  {
+    "character": 2,
+    "length": 6,
+    "line": 5,
+    "modifiers": 1,
+    "tokenType": 4
+  },
+  {
+    "character": 14,
+    "length": 9,
+    "line": 8,
+    "modifiers": 1,
+    "tokenType": 2
+  },
+  {
+    "character": 2,
+    "length": 4,
+    "line": 9,
+    "modifiers": 0,
+    "tokenType": 6
+  },
+  {
+    "character": 2,
+    "length": 8,
+    "line": 10,
+    "modifiers": 0,
+    "tokenType": 6
+  },
+  {
+    "character": 14,
+    "length": 11,
+    "line": 16,
+    "modifiers": 3,
+    "tokenType": 6
+  },
+  {
+    "character": 27,
+    "length": 7,
+    "line": 16,
+    "modifiers": 4,
+    "tokenType": 1
+  },
+  {
+    "character": 14,
+    "length": 8,
+    "line": 17,
+    "modifiers": 3,
+    "tokenType": 6
+  },
+  {
+    "character": 24,
+    "length": 3,
+    "line": 17,
+    "modifiers": 4,
+    "tokenType": 1
+  },
+  {
+    "character": 28,
+    "length": 11,
+    "line": 17,
+    "modifiers": 4,
+    "tokenType": 1
+  },
+  {
+    "character": 8,
+    "length": 9,
+    "line": 19,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 14,
+    "length": 9,
+    "line": 22,
+    "modifiers": 0,
+    "tokenType": 0
+  },
+  {
+    "character": 15,
+    "length": 10,
+    "line": 25,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 26,
+    "length": 6,
+    "line": 25,
+    "modifiers": 0,
+    "tokenType": 5
+  },
+  {
+    "character": 14,
+    "length": 9,
+    "line": 26,
+    "modifiers": 0,
+    "tokenType": 0
+  },
+  {
+    "character": 15,
+    "length": 8,
+    "line": 29,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 24,
+    "length": 4,
+    "line": 29,
+    "modifiers": 0,
+    "tokenType": 5
+  },
+  {
+    "character": 30,
+    "length": 9,
+    "line": 29,
+    "modifiers": 0,
+    "tokenType": 1
+  },
+  {
+    "character": 42,
+    "length": 11,
+    "line": 29,
+    "modifiers": 0,
+    "tokenType": 1
+  },
+  {
+    "character": 14,
+    "length": 8,
+    "line": 30,
+    "modifiers": 0,
+    "tokenType": 6
+  },
+  {
+    "character": 42,
+    "length": 6,
+    "line": 30,
+    "modifiers": 0,
+    "tokenType": 6
+  },
+  {
+    "character": 63,
+    "length": 6,
+    "line": 30,
+    "modifiers": 0,
+    "tokenType": 6
+  },
+  {
+    "character": 15,
+    "length": 12,
+    "line": 33,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 15,
+    "length": 10,
+    "line": 37,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 26,
+    "length": 5,
+    "line": 37,
+    "modifiers": 0,
+    "tokenType": 5
+  },
+  {
+    "character": 33,
+    "length": 11,
+    "line": 37,
+    "modifiers": 4,
+    "tokenType": 1
+  },
+  {
+    "character": 18,
+    "length": 6,
+    "line": 38,
+    "modifiers": 0,
+    "tokenType": 0
+  },
+  {
+    "character": 15,
+    "length": 6,
+    "line": 41,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 22,
+    "length": 6,
+    "line": 41,
+    "modifiers": 0,
+    "tokenType": 5
+  },
+  {
+    "character": 30,
+    "length": 6,
+    "line": 41,
+    "modifiers": 0,
+    "tokenType": 1
+  },
+  {
+    "character": 15,
+    "length": 11,
+    "line": 45,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 27,
+    "length": 5,
+    "line": 45,
+    "modifiers": 0,
+    "tokenType": 5
+  },
+  {
+    "character": 34,
+    "length": 5,
+    "line": 45,
+    "modifiers": 0,
+    "tokenType": 1
+  },
+  {
+    "character": 8,
+    "length": 8,
+    "line": 49,
+    "modifiers": 1,
+    "tokenType": 0
+  },
+  {
+    "character": 20,
+    "length": 5,
+    "line": 49,
+    "modifiers": 0,
+    "tokenType": 5
+  },
+  {
+    "character": 27,
+    "length": 1,
+    "line": 49,
+    "modifiers": 0,
+    "tokenType": 1
+  },
+  {
+    "character": 31,
+    "length": 1,
+    "line": 49,
+    "modifiers": 0,
+    "tokenType": 1
+  }
+]

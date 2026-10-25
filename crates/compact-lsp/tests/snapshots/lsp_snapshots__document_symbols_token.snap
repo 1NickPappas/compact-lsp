@@ -1,0 +1,478 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: "response.get(\"result\")"
+---
+[
+  {
+    "children": [
+      {
+        "kind": 22,
+        "name": "active",
+        "range": {
+          "end": {
+            "character": 8,
+            "line": 4
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 8,
+            "line": 4
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        }
+      },
+      {
+        "kind": 22,
+        "name": "paused",
+        "range": {
+          "end": {
+            "character": 8,
+            "line": 5
+          },
+          "start": {
+            "character": 2,
+            "line": 5
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 8,
+            "line": 5
+          },
+          "start": {
+            "character": 2,
+            "line": 5
+          }
+        }
+      }
+    ],
+    "kind": 10,
+    "name": "TokenStatus",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 6
+      },
+      "start": {
+        "character": 0,
+        "line": 3
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 6
+      },
+      "start": {
+        "character": 0,
+        "line": 3
+      }
+    }
+  },
+  {
+    "children": [
+      {
+        "kind": 8,
+        "name": "name",
+        "range": {
+          "end": {
+            "character": 17,
+            "line": 9
+          },
+          "start": {
+            "character": 2,
+            "line": 9
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 17,
+            "line": 9
+          },
+          "start": {
+            "character": 2,
+            "line": 9
+          }
+        }
+      },
+      {
+        "kind": 8,
+        "name": "decimals",
+        "range": {
+          "end": {
+            "character": 19,
+            "line": 10
+          },
+          "start": {
+            "character": 2,
+            "line": 10
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 19,
+            "line": 10
+          },
+          "start": {
+            "character": 2,
+            "line": 10
+          }
+        }
+      }
+    ],
+    "kind": 23,
+    "name": "TokenInfo",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 11
+      },
+      "start": {
+        "character": 0,
+        "line": 8
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 11
+      },
+      "start": {
+        "character": 0,
+        "line": 8
+      }
+    }
+  },
+  {
+    "detail": "type",
+    "kind": 11,
+    "name": "Amount",
+    "range": {
+      "end": {
+        "character": 23,
+        "line": 13
+      },
+      "start": {
+        "character": 0,
+        "line": 13
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 23,
+        "line": 13
+      },
+      "start": {
+        "character": 0,
+        "line": 13
+      }
+    }
+  },
+  {
+    "detail": "type",
+    "kind": 11,
+    "name": "Cents",
+    "range": {
+      "end": {
+        "character": 26,
+        "line": 14
+      },
+      "start": {
+        "character": 0,
+        "line": 14
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 26,
+        "line": 14
+      },
+      "start": {
+        "character": 0,
+        "line": 14
+      }
+    }
+  },
+  {
+    "detail": "ledger",
+    "kind": 13,
+    "name": "totalSupply",
+    "range": {
+      "end": {
+        "character": 35,
+        "line": 16
+      },
+      "start": {
+        "character": 0,
+        "line": 16
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 35,
+        "line": 16
+      },
+      "start": {
+        "character": 0,
+        "line": 16
+      }
+    }
+  },
+  {
+    "detail": "ledger",
+    "kind": 13,
+    "name": "balances",
+    "range": {
+      "end": {
+        "character": 51,
+        "line": 17
+      },
+      "start": {
+        "character": 0,
+        "line": 17
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 51,
+        "line": 17
+      },
+      "start": {
+        "character": 0,
+        "line": 17
+      }
+    }
+  },
+  {
+    "detail": "witness",
+    "kind": 12,
+    "name": "getSecret",
+    "range": {
+      "end": {
+        "character": 31,
+        "line": 19
+      },
+      "start": {
+        "character": 0,
+        "line": 19
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 31,
+        "line": 19
+      },
+      "start": {
+        "character": 0,
+        "line": 19
+      }
+    }
+  },
+  {
+    "kind": 9,
+    "name": "constructor",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 23
+      },
+      "start": {
+        "character": 0,
+        "line": 21
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 23
+      },
+      "start": {
+        "character": 0,
+        "line": 21
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "mintTokens",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 27
+      },
+      "start": {
+        "character": 0,
+        "line": 25
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 27
+      },
+      "start": {
+        "character": 0,
+        "line": 25
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "statusOf",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 31
+      },
+      "start": {
+        "character": 0,
+        "line": 29
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 31
+      },
+      "start": {
+        "character": 0,
+        "line": 29
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "revealSecret",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 35
+      },
+      "start": {
+        "character": 0,
+        "line": 33
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 35
+      },
+      "start": {
+        "character": 0,
+        "line": 33
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "balanceFor",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 39
+      },
+      "start": {
+        "character": 0,
+        "line": 37
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 39
+      },
+      "start": {
+        "character": 0,
+        "line": 37
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "charge",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 43
+      },
+      "start": {
+        "character": 0,
+        "line": 41
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 43
+      },
+      "start": {
+        "character": 0,
+        "line": 41
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "centsToUint",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 47
+      },
+      "start": {
+        "character": 0,
+        "line": 45
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 47
+      },
+      "start": {
+        "character": 0,
+        "line": 45
+      }
+    }
+  },
+  {
+    "detail": "circuit",
+    "kind": 12,
+    "name": "identity",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 51
+      },
+      "start": {
+        "character": 0,
+        "line": 49
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 51
+      },
+      "start": {
+        "character": 0,
+        "line": 49
+      }
+    }
+  }
+]

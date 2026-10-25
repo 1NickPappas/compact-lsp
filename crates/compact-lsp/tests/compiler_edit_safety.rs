@@ -19,8 +19,8 @@ mod common;
 use std::path::Path;
 
 use common::{
-    LspClient, apply_text_edits, apply_workspace_edit_to_disk, copy_fixtures_to, initialize, open,
-    position_of, read_fixture, require_compiler, require_formatter,
+    LspClient, apply_text_edits, apply_workspace_edit_to_disk, copy_fixtures_to, initialize,
+    open_and_wait, position_of, read_fixture, require_compiler, require_formatter,
 };
 use compact_analyzer::{DiagnosticEngine, FormatterEngine};
 use serde_json::{Value, json};
@@ -68,7 +68,7 @@ async fn test_rename_struct_keeps_project_compiling() {
 
     // 1. Same-file rename of a struct name used in a type position.
     let (token_uri, token_src) = read_fixture(&root, "portable/token.compact");
-    open(&mut client, &token_uri, &token_src);
+    open_and_wait(&mut client, &token_uri, &token_src);
     let (line, column) = position_of(&token_src, "export struct TokenInfo");
     let response = client.request(
         "textDocument/rename",
@@ -93,7 +93,7 @@ async fn test_rename_struct_keeps_project_compiling() {
     // 2. Cross-file rename of a struct exported from a module and imported by
     //    plain, prefixed, and selective imports.
     let (lib_uri, lib_src) = read_fixture(&root, "portable/lib.compact");
-    open(&mut client, &lib_uri, &lib_src);
+    open_and_wait(&mut client, &lib_uri, &lib_src);
     let (line, column) = position_of(&lib_src, "export struct Order");
     let response = client.request(
         "textDocument/rename",
@@ -139,7 +139,7 @@ async fn test_rename_selective_element_preserves_alias() {
 
     let mut client = start_client(&root);
     let (lib_uri, lib_src) = read_fixture(&root, "portable/lib.compact");
-    open(&mut client, &lib_uri, &lib_src);
+    open_and_wait(&mut client, &lib_uri, &lib_src);
 
     let (line, column) = position_of(&lib_src, "export circuit total");
     let response = client.request(
@@ -198,7 +198,7 @@ async fn test_rename_enum_type_updates_variant_bases() {
 
     let mut client = start_client(&root);
     let (token_uri, token_src) = read_fixture(&root, "portable/token.compact");
-    open(&mut client, &token_uri, &token_src);
+    open_and_wait(&mut client, &token_uri, &token_src);
     let (line, column) = position_of(&token_src, "export enum TokenStatus");
     let response = client.request(
         "textDocument/rename",
@@ -230,7 +230,7 @@ async fn test_whole_document_formatting_keeps_project_compiling() {
 
     let mut client = start_client(&root);
     let (uri, source) = read_fixture(&root, "portable/messy.compact");
-    open(&mut client, &uri, &source);
+    open_and_wait(&mut client, &uri, &source);
 
     let response = client.request(
         "textDocument/formatting",
@@ -275,7 +275,7 @@ async fn test_range_formatting_touches_only_selection() {
 
     let mut client = start_client(&root);
     let (uri, source) = read_fixture(&root, "portable/messy.compact");
-    open(&mut client, &uri, &source);
+    open_and_wait(&mut client, &uri, &source);
 
     let lines: Vec<&str> = source.lines().collect();
     let start = lines

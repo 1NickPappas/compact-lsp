@@ -1,0 +1,20 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: "response.get(\"result\")"
+---
+{
+  "contents": {
+    "kind": "markdown",
+    "value": "```compact\nstruct TokenInfo\n```\n\nStruct type\n\nFields:\n- `name: Bytes<32>`\n- `decimals: Uint<8>`"
+  },
+  "range": {
+    "end": {
+      "character": 1,
+      "line": 11
+    },
+    "start": {
+      "character": 0,
+      "line": 8
+    }
+  }
+}

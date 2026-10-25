@@ -385,6 +385,14 @@ pub fn open(client: &mut LspClient, uri: &str, text: &str) {
     );
 }
 
+/// Open a document and wait until the server publishes its diagnostics, which
+/// guarantees the `didOpen` notification has been fully processed before the
+/// next request (requests and notifications are handled concurrently).
+pub fn open_and_wait(client: &mut LspClient, uri: &str, text: &str) {
+    open(client, uri, text);
+    client.wait_for_diagnostics(uri);
+}
+
 pub fn close(client: &mut LspClient, uri: &str) {
     client.notify(
         "textDocument/didClose",

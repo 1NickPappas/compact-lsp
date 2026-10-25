@@ -1,0 +1,15 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: labels
+---
+[
+  "insert",
+  "insertCoin",
+  "insertDefault",
+  "isEmpty",
+  "lookup",
+  "member",
+  "remove",
+  "resetToDefault",
+  "size"
+]

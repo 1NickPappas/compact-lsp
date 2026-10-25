@@ -1,0 +1,156 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: "response.get(\"result\")"
+---
+[
+  {
+    "children": [
+      {
+        "children": [
+          {
+            "kind": 8,
+            "name": "id",
+            "range": {
+              "end": {
+                "character": 16,
+                "line": 3
+              },
+              "start": {
+                "character": 4,
+                "line": 3
+              }
+            },
+            "selectionRange": {
+              "end": {
+                "character": 16,
+                "line": 3
+              },
+              "start": {
+                "character": 4,
+                "line": 3
+              }
+            }
+          },
+          {
+            "kind": 8,
+            "name": "amount",
+            "range": {
+              "end": {
+                "character": 20,
+                "line": 4
+              },
+              "start": {
+                "character": 4,
+                "line": 4
+              }
+            },
+            "selectionRange": {
+              "end": {
+                "character": 20,
+                "line": 4
+              },
+              "start": {
+                "character": 4,
+                "line": 4
+              }
+            }
+          }
+        ],
+        "kind": 23,
+        "name": "Order",
+        "range": {
+          "end": {
+            "character": 3,
+            "line": 5
+          },
+          "start": {
+            "character": 2,
+            "line": 2
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 3,
+            "line": 5
+          },
+          "start": {
+            "character": 2,
+            "line": 2
+          }
+        }
+      },
+      {
+        "detail": "circuit",
+        "kind": 12,
+        "name": "total",
+        "range": {
+          "end": {
+            "character": 3,
+            "line": 9
+          },
+          "start": {
+            "character": 2,
+            "line": 7
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 3,
+            "line": 9
+          },
+          "start": {
+            "character": 2,
+            "line": 7
+          }
+        }
+      },
+      {
+        "detail": "circuit",
+        "kind": 12,
+        "name": "identity",
+        "range": {
+          "end": {
+            "character": 3,
+            "line": 13
+          },
+          "start": {
+            "character": 2,
+            "line": 11
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 3,
+            "line": 13
+          },
+          "start": {
+            "character": 2,
+            "line": 11
+          }
+        }
+      }
+    ],
+    "kind": 2,
+    "name": "lib",
+    "range": {
+      "end": {
+        "character": 1,
+        "line": 14
+      },
+      "start": {
+        "character": 0,
+        "line": 1
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 1,
+        "line": 14
+      },
+      "start": {
+        "character": 0,
+        "line": 1
+      }
+    }
+  }
+]

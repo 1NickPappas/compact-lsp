@@ -1,0 +1,132 @@
+---
+source: crates/compact-lsp/tests/lsp_snapshots.rs
+expression: "response.get(\"result\")"
+---
+[
+  {
+    "endCharacter": 1,
+    "endLine": 6,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 3
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 11,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 8
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 23,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 21
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 23,
+    "kind": "region",
+    "startCharacter": 14,
+    "startLine": 21
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 27,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 25
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 27,
+    "kind": "region",
+    "startCharacter": 48,
+    "startLine": 25
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 31,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 29
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 31,
+    "kind": "region",
+    "startCharacter": 54,
+    "startLine": 29
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 35,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 33
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 35,
+    "kind": "region",
+    "startCharacter": 41,
+    "startLine": 33
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 39,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 37
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 39,
+    "kind": "region",
+    "startCharacter": 56,
+    "startLine": 37
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 43,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 41
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 43,
+    "kind": "region",
+    "startCharacter": 48,
+    "startLine": 41
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 47,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 45
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 47,
+    "kind": "region",
+    "startCharacter": 51,
+    "startLine": 45
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 51,
+    "kind": "region",
+    "startCharacter": 0,
+    "startLine": 49
+  },
+  {
+    "endCharacter": 1,
+    "endLine": 51,
+    "kind": "region",
+    "startCharacter": 33,
+    "startLine": 49
+  }
+]
