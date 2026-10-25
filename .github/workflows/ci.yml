@@ -73,6 +73,16 @@ jobs:
       - name: Probe registry against the detected compiler
         run: cargo test -p compact-analyzer probe -- --nocapture
 
+      # Run the whole suite (unit + end-to-end + compiler-backed) against the
+      # installed toolchain. The REQUIRE flags make a missing compiler or
+      # formatter a hard failure instead of a silent skip, so these legs can
+      # never pass without exercising the real binaries.
+      - name: Run the full suite against the detected compiler
+        env:
+          COMPACT_LSP_REQUIRE_COMPILER: "1"
+          COMPACT_LSP_REQUIRE_FORMATTER: "1"
+        run: cargo test --all-features
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
