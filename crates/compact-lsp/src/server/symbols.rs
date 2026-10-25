@@ -2,6 +2,52 @@
 
 use super::*;
 
+/// Delta-encode parser tokens into the LSP wire format.
+///
+/// Uses saturating arithmetic: the LSP requires tokens sorted by position,
+/// but a malformed order must degrade to a zero delta instead of
+/// underflowing (which panics in debug builds).
+pub(super) fn encode_semantic_tokens(tokens: &[SemanticToken]) -> Vec<lsp_types::SemanticToken> {
+    let mut data = Vec::with_capacity(tokens.len());
+    let mut prev_line = 0u32;
+    let mut prev_char = 0u32;
+
+    for token in tokens {
+        let line = token.range.start.line;
+        let char = token.range.start.character;
+        let length = token
+            .range
+            .end
+            .character
+            .saturating_sub(token.range.start.character);
+
+        let delta_line = line.saturating_sub(prev_line);
+        let delta_start = if delta_line == 0 {
+            char.saturating_sub(prev_char)
+        } else {
+            char
+        };
+
+        let mut modifier_mask = 0u32;
+        for modifier in &token.modifiers {
+            modifier_mask |= 1 << (*modifier as u32);
+        }
+
+        data.push(lsp_types::SemanticToken {
+            delta_line,
+            delta_start,
+            length,
+            token_type: token.token_type as u32,
+            token_modifiers_bitset: modifier_mask,
+        });
+
+        prev_line = line;
+        prev_char = char;
+    }
+
+    data
+}
+
 impl CompactLanguageServer {
     pub(super) async fn handle_document_symbol(
         &self,
@@ -95,46 +141,12 @@ impl CompactLanguageServer {
             parser.get_semantic_tokens(&content)
         };
 
-        let mut data = Vec::new();
-        let mut prev_line = 0u32;
-        let mut prev_char = 0u32;
-
-        for token in tokens {
-            let line = token.range.start.line;
-            let char = token.range.start.character;
-            let length = token
-                .range
-                .end
-                .character
-                .saturating_sub(token.range.start.character);
-
-            let delta_line = line - prev_line;
-            let delta_start = if delta_line == 0 {
-                char - prev_char
-            } else {
-                char
-            };
-
-            let mut modifier_mask = 0u32;
-            for modifier in &token.modifiers {
-                modifier_mask |= 1 << (*modifier as u32);
-            }
-
-            data.push(lsp_types::SemanticToken {
-                delta_line,
-                delta_start,
-                length,
-                token_type: token.token_type as u32,
-                token_modifiers_bitset: modifier_mask,
-            });
-
-            prev_line = line;
-            prev_char = char;
-        }
-
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
-            data,
+            data: encode_semantic_tokens(&tokens),
         })))
     }
 }
+
+#[cfg(test)]
+mod tests;

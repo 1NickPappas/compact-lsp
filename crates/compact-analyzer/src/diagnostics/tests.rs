@@ -326,3 +326,35 @@ fn test_parse_invalid_line() {
     let line = "This is not an error line";
     assert!(parse_error_line(line).is_none());
 }
+
+/// Two documents in one directory must not share a compiler temp input, and
+/// the temp input must be removed afterwards.
+#[tokio::test]
+async fn test_diagnose_content_uses_unique_temp_files() {
+    let engine = DiagnosticEngine::new();
+    if !engine.is_available() {
+        eprintln!("skipping probe: no compactc detected");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source =
+        "import CompactStandardLibrary;\n\nexport circuit f(): Uint<8> {\n  return 1;\n}\n";
+    let a = format!("file://{}", dir.path().join("a.compact").display());
+    let b = format!("file://{}", dir.path().join("b.compact").display());
+
+    let (a_diagnostics, b_diagnostics) = tokio::join!(
+        engine.diagnose_content(&a, source),
+        engine.diagnose_content(&b, source),
+    );
+    assert!(a_diagnostics.is_empty(), "{a_diagnostics:#?}");
+    assert!(b_diagnostics.is_empty(), "{b_diagnostics:#?}");
+
+    let leftovers: Vec<String> = std::fs::read_dir(dir.path())
+        .expect("read temp dir")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(".compact-lsp-temp-"))
+        .collect();
+    assert!(leftovers.is_empty(), "leftover temp inputs: {leftovers:?}");
+}

@@ -40,7 +40,7 @@ use std::sync::Mutex;
 
 use compact_analyzer::{
     CompletionSymbol, CompletionSymbolKind, ContractTypeInfo, DiagnosticEngine, FormatterEngine,
-    LanguageVersion, MemberBase, ParserEngine, SymbolLocation, TypeMemberKind,
+    LanguageVersion, MemberBase, ParserEngine, SemanticToken, SymbolLocation, TypeMemberKind,
 };
 use dashmap::DashMap;
 use lsp_types::*;

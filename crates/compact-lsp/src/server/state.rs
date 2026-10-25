@@ -1,6 +1,6 @@
 //! Document state management.
 
-use lsp_types::Range;
+use lsp_types::{Position, Range};
 use ropey::Rope;
 
 /// A document we're tracking (an open file in the editor).
@@ -20,13 +20,18 @@ pub struct Document {
 impl Document {
     /// Apply a single LSP content change: an incremental edit when `range` is
     /// present, otherwise a full-document replacement.
+    ///
+    /// Malformed ranges from a client (line past the end, character past the
+    /// line, inverted bounds) are clamped or ignored rather than panicking,
+    /// so a bad incremental edit cannot take the server down.
     pub fn apply_change(&mut self, range: Option<&Range>, text: &str) {
         match range {
             Some(range) => {
-                let start_idx = self.content.line_to_char(range.start.line as usize)
-                    + range.start.character as usize;
-                let end_idx = self.content.line_to_char(range.end.line as usize)
-                    + range.end.character as usize;
+                let start_idx = self.char_index(&range.start);
+                let end_idx = self.char_index(&range.end);
+                if start_idx > end_idx {
+                    return;
+                }
                 self.content.remove(start_idx..end_idx);
                 self.content.insert(start_idx, text);
             }
@@ -34,6 +39,22 @@ impl Document {
                 self.content = Rope::from_str(text);
             }
         }
+    }
+
+    /// Char index for an LSP position, clamped to the document (and to the
+    /// line when the position is within it).
+    fn char_index(&self, position: &Position) -> usize {
+        let line = position.line as usize;
+        if line >= self.content.len_lines() {
+            return self.content.len_chars();
+        }
+        let line_start = self.content.line_to_char(line);
+        let line_end = if line + 1 < self.content.len_lines() {
+            self.content.line_to_char(line + 1)
+        } else {
+            self.content.len_chars()
+        };
+        (line_start + position.character as usize).min(line_end)
     }
 }
 

@@ -44,7 +44,6 @@ fn test_find_compact_files_missing_root_is_error() {
 /// Temporary compiler-input files live next to the source with a dot prefix;
 /// they must never be indexed as workspace symbols or scanned as sources.
 #[test]
-#[ignore = "hidden .compact files are currently indexed; see TESTING.md#known-issues"]
 fn test_find_compact_files_skips_hidden_files() {
     let dir = tempfile::tempdir().expect("tempdir");
     touch(&dir.path().join(".compact-lsp-temp-1234.compact"));

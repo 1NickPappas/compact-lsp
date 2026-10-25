@@ -50,4 +50,3 @@ forgotten and so the fix has a ready-made target. Run them with
 |---|---|
 | **UTF-16 ↔ byte positions.** tree-sitter reports byte columns while LSP positions are UTF-16 code units, so any line where non-ASCII precedes code gets wrong hover/definition/reference/rename/semantic-token ranges, and `didChange` after an astral character is off by one character. | `crates/compact-lsp/tests/unicode_positions.rs` (4 ignored tests) + README Known Limitations |
 | **Renaming a type whose uses are member bases.** Renaming an enum type does not update `EnumName.variant` expressions, leaving the project uncompilable. | `compiler_edit_safety.rs::test_rename_enum_type_updates_variant_bases` (ignored) |
-| **Hidden `.compact` files are indexed.** `find_compact_files` skips hidden directories but not dot-prefixed files, so a leftover `.compact-lsp-temp-*.compact` can be scanned as a source. | `workspace/tests.rs::test_find_compact_files_skips_hidden_files` (ignored) |

@@ -5,12 +5,20 @@ use super::*;
 impl CompactLanguageServer {
     /// Publish diagnostics for a document.
     async fn publish_diagnostics(&self, uri: Uri) {
-        let content = match self.documents.get(&uri.to_string()) {
-            Some(doc) => doc.content.to_string(),
+        let uri_string = uri.to_string();
+
+        // An immediate publish supersedes any pending debounced compiler pass,
+        // so diagnostics cannot arrive out of order afterwards.
+        if let Some((_, handle)) = self.pending_diagnostics.remove(&uri_string) {
+            handle.abort();
+        }
+
+        let (content, in_memory) = match self.documents.get(&uri_string) {
+            Some(doc) => (doc.content.to_string(), true),
             None => {
                 let path = uri.path().as_str();
                 match std::fs::read_to_string(path) {
-                    Ok(content) => content,
+                    Ok(content) => (content, false),
                     Err(_) => return,
                 }
             }
@@ -31,10 +39,15 @@ impl CompactLanguageServer {
                 .collect()
         };
 
-        let compiler_diagnostics = self
-            .diagnostic_engine
-            .diagnose(&uri.to_string(), &content)
-            .await;
+        // Prefer the live buffer for open documents: unsaved edits must be
+        // diagnosed, not the stale copy on disk.
+        let compiler_diagnostics = if in_memory {
+            self.diagnostic_engine
+                .diagnose_content(&uri_string, &content)
+                .await
+        } else {
+            self.diagnostic_engine.diagnose(&uri_string, &content).await
+        };
 
         let mut all_diagnostics = syntax_diagnostics;
         all_diagnostics.extend(compiler_diagnostics);

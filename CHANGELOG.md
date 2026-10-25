@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Live diagnostics now use the in-memory buffer for open documents.** Previously `didOpen`
+  compiled the file on disk, so a dirty buffer showed stale errors (and an unsaved new file got
+  none).
+- **Malformed incremental edits no longer panic the server.** A `didChange` whose ranges point past
+  the end of the document, past the end of a line, or are inverted is clamped or ignored.
+- **Compiler input is written to a per-run unique temp file.** Two documents diagnosed
+  concurrently in one directory can no longer race on a shared `.compact-lsp-temp-*.compact`, and
+  the file is always removed. Such dot-prefixed files are also excluded from workspace scanning.
+- **Saving (or opening) a document cancels a pending debounced compiler pass**, so diagnostics can
+  no longer arrive out of order after an immediate publish.
+- **Semantic-token delta encoding saturates** instead of underflowing on out-of-order tokens.
+
 ### Internal
 - **Modularized the two large source files.** `compact-analyzer`'s `parser/mod.rs` (4714 lines) and
   `compact-lsp`'s `server/mod.rs` (3746 lines) are now facades over focused submodules; embedded
-  tests moved to sibling `tests.rs` files. No public API or behavior change.
+  tests moved to sibling `tests.rs` files. No public API change.
 
 ## [0.6.0] - 2026-10-25
 

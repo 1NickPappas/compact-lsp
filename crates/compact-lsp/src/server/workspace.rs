@@ -23,6 +23,13 @@ fn find_compact_files_recursive(dir: &str, files: &mut Vec<String>) -> io::Resul
                 find_compact_files_recursive(path.to_str().unwrap_or(""), files)?;
             }
         } else if path.extension().map(|e| e == "compact").unwrap_or(false)
+            // Hidden files include the server's own compiler temp inputs;
+            // they must never be scanned as sources.
+            && !path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .starts_with('.')
             && let Some(path_str) = path.to_str()
         {
             files.push(path_str.to_string());

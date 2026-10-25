@@ -342,12 +342,23 @@ impl DiagnosticEngine {
             }
         };
 
-        // Create temp file in the same directory as the original file
-        // This ensures imports resolve correctly
-        let temp_file_name = format!(".compact-lsp-temp-{}.compact", std::process::id());
-        let temp_file_path = original_dir.join(&temp_file_name);
+        // Write the content to a uniquely named temp file in the same
+        // directory as the original file, so imports resolve correctly.
+        // `tempfile` guarantees a fresh name per call, which keeps concurrent
+        // diagnostics for two documents in one directory from colliding.
+        let temp_file = match tempfile::Builder::new()
+            .prefix(".compact-lsp-temp-")
+            .suffix(".compact")
+            .tempfile_in(original_dir)
+        {
+            Ok(file) => file,
+            Err(e) => {
+                tracing::error!("Failed to create temp file: {}", e);
+                return Vec::new();
+            }
+        };
+        let temp_file_path = temp_file.path().to_path_buf();
 
-        // Write content to temp file
         if let Err(e) = std::fs::write(&temp_file_path, content) {
             tracing::error!("Failed to write temp file: {}", e);
             return Vec::new();
@@ -358,7 +369,6 @@ impl DiagnosticEngine {
             Ok(dir) => dir,
             Err(e) => {
                 tracing::error!("Failed to create temp directory: {}", e);
-                let _ = std::fs::remove_file(&temp_file_path);
                 return Vec::new();
             }
         };
@@ -383,13 +393,11 @@ impl DiagnosticEngine {
             Ok(output) => output,
             Err(e) => {
                 tracing::error!("Failed to run compiler: {}", e);
-                let _ = std::fs::remove_file(&temp_file_path);
                 return Vec::new();
             }
         };
-
-        // Clean up temp file
-        let _ = std::fs::remove_file(&temp_file_path);
+        // `temp_file` is dropped here, removing the temp input.
+        drop(temp_file);
 
         // Parse stderr and stdout for errors
         let stderr = String::from_utf8_lossy(&output.stderr);

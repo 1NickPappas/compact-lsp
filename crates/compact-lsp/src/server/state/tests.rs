@@ -1,7 +1,6 @@
 //! Unit tests for document state and rope edits.
 
 use super::*;
-use lsp_types::Position;
 
 fn doc(text: &str) -> Document {
     Document {
@@ -68,4 +67,34 @@ fn test_apply_change_keeps_other_state() {
         document.version, 7,
         "apply_change must not touch the version"
     );
+}
+
+#[test]
+fn test_apply_change_out_of_range_line_is_clamped() {
+    let mut document = doc("a\nb\n");
+    // Line 999 does not exist: the change lands at the end of the document.
+    document.apply_change(Some(&range((999, 0), (999, 0))), "X");
+    assert_eq!(document.content.to_string(), "a\nb\nX");
+}
+
+#[test]
+fn test_apply_change_character_beyond_line_is_clamped() {
+    let mut document = doc("a\nb\n");
+    // A character far past the first line clamps to that line's end.
+    document.apply_change(Some(&range((0, 999), (0, 999))), "X");
+    assert_eq!(document.content.to_string(), "a\nXb\n");
+}
+
+#[test]
+fn test_apply_change_inverted_range_is_ignored() {
+    let mut document = doc("alpha\nbeta\n");
+    document.apply_change(Some(&range((1, 0), (0, 0))), "X");
+    assert_eq!(document.content.to_string(), "alpha\nbeta\n");
+}
+
+#[test]
+fn test_apply_change_position_one_past_last_line_is_eof() {
+    let mut document = doc("a\nb");
+    document.apply_change(Some(&range((2, 0), (2, 0))), "X");
+    assert_eq!(document.content.to_string(), "a\nbX");
 }
