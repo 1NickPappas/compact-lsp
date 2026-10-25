@@ -240,11 +240,20 @@ impl CompactLanguageServer {
     }
 
     /// Get all files that depend on (import) the given file.
+    ///
+    /// Dependencies are recorded against canonical paths during the workspace
+    /// scan while callers may hold the client's URI, so compare physically.
     pub(super) fn get_dependents(&self, uri: &str) -> Vec<String> {
-        self.reverse_dependencies
-            .get(uri)
-            .map(|deps| deps.value().clone())
-            .unwrap_or_default()
+        let key = canonical_key(uri);
+        let mut dependents = Vec::new();
+        for entry in self.reverse_dependencies.iter() {
+            if canonical_key(entry.key()) == key {
+                dependents.extend(entry.value().iter().cloned());
+            }
+        }
+        dependents.sort();
+        dependents.dedup();
+        dependents
     }
 }
 
