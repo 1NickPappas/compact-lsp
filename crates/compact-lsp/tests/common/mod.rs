@@ -85,9 +85,19 @@ impl LspClient {
 
     pub fn send(&mut self, message: Value) {
         let body = serde_json::to_string(&message).unwrap();
+        self.send_raw(&body);
+    }
+
+    /// Write an arbitrary body as an LSP frame (for malformed-JSON tests).
+    pub fn send_raw(&mut self, body: &str) {
         write!(self.stdin, "Content-Length: {}\r\n\r\n{}", body.len(), body)
             .expect("write LSP message");
         self.stdin.flush().expect("flush LSP message");
+    }
+
+    /// Receive the next message within `timeout`, if any.
+    pub fn try_recv(&mut self, timeout: Duration) -> Option<Value> {
+        self.rx.recv_timeout(timeout).ok()
     }
 
     pub fn notify(&mut self, method: &str, params: Value) {
@@ -190,6 +200,43 @@ impl LspClient {
         }
     }
 
+    /// Assert no `publishDiagnostics` notification for `uri` arrives within
+    /// `window` (used to prove a pending debounce was cancelled).
+    pub fn assert_no_diagnostics_for(&mut self, uri: &str, window: Duration) {
+        let deadline = Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return;
+            }
+            match self.rx.recv_timeout(remaining) {
+                Ok(value)
+                    if value.get("method") == Some(&json!("textDocument/publishDiagnostics"))
+                        && value.pointer("/params/uri").and_then(Value::as_str) == Some(uri) =>
+                {
+                    panic!("unexpected diagnostics for {uri} after close: {value}");
+                }
+                Ok(_) => continue,
+                Err(_) => return,
+            }
+        }
+    }
+
+    /// Wait until the child process exits, returning its status.
+    pub fn wait_for_exit(&mut self, timeout: Duration) -> Option<std::process::ExitStatus> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                return Some(status);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Send `exit` and wait for the process to terminate.
     pub fn shutdown(mut self) {
         self.notify("exit", Value::Null);
         let _ = self.child.wait();
@@ -270,7 +317,12 @@ pub fn apply_text_edits(content: &str, edits: &[Value]) -> String {
             .pointer("/range/end/character")
             .and_then(Value::as_u64)
             .unwrap_or(0) as u32;
-        let new_text = edit.get("newText").and_then(Value::as_str).unwrap_or("");
+        // `TextEdit`s use `newText`; `didChange` content changes use `text`.
+        let new_text = edit
+            .get("newText")
+            .or_else(|| edit.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let start = offset_of(&out, start_line, start_char);
         let end = offset_of(&out, end_line, end_char);
         out.replace_range(start..end, new_text);

@@ -87,3 +87,20 @@ fn test_apply_workspace_edit_to_disk() {
         "circuit renamed() {}\n"
     );
 }
+
+#[test]
+fn test_apply_text_edits_accepts_did_change_text() {
+    // `didChange` content changes use `text`, not the `newText` of a TextEdit.
+    let base = "a\nb\n";
+    let insert = json!({
+        "range": {
+            "start": { "line": 2, "character": 0 },
+            "end": { "line": 2, "character": 0 }
+        },
+        "text": "c\n"
+    });
+    assert_eq!(
+        apply_text_edits(base, std::slice::from_ref(&insert)),
+        "a\nb\nc\n"
+    );
+}
