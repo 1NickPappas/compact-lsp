@@ -12,7 +12,10 @@
 
 mod common;
 
-use common::{LspClient, copy_fixtures_to, initialize, open_and_wait, position_of, read_fixture};
+use common::{
+    LspClient, copy_fixtures_to, initialize, initialize_and_capture, open_and_wait, position_of,
+    read_fixture,
+};
 use serde_json::{Value, json};
 
 fn start_server(root: &std::path::Path) -> LspClient {
@@ -85,6 +88,21 @@ fn labels_of(response: &Value) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect()
+}
+
+/// Any capability addition/removal must show up as a reviewable snapshot
+/// diff (server_info carries the version and is deliberately excluded).
+#[test]
+fn test_snapshot_initialize_capabilities() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root_uri = format!("file://{}", temp.path().display());
+    let mut client = LspClient::start();
+    let response = initialize_and_capture(&mut client, &root_uri);
+    insta::assert_json_snapshot!(
+        "initialize_capabilities",
+        response.pointer("/result/capabilities")
+    );
+    client.shutdown();
 }
 
 #[test]

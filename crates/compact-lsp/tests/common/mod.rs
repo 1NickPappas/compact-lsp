@@ -31,12 +31,21 @@ pub struct LspClient {
 
 impl LspClient {
     pub fn start() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_compact-lsp"))
+        Self::start_with_env(&[])
+    }
+
+    /// Start the server with extra environment overrides (values are applied
+    /// on top of the inherited environment).
+    pub fn start_with_env(env: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_compact-lsp"));
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn compact-lsp");
+            .stderr(Stdio::null());
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let mut child = command.spawn().expect("spawn compact-lsp");
 
         let stdin = child.stdin.take().expect("stdin");
         let stdout = child.stdout.take().expect("stdout");

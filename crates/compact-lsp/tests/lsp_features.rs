@@ -259,6 +259,65 @@ fn test_rename_rejects_invalid_new_names() {
     client.shutdown();
 }
 
+/// Without `format-compact` both formatting requests degrade to a null
+/// result (and a `window/showMessage`), never an error or a crash.
+/// With a formatter present the positive path is covered by
+/// `compiler_edit_safety.rs`.
+#[test]
+fn test_formatting_is_null_without_formatter() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (root_uri, uri) = virtual_uri(temp.path(), "format.compact");
+
+    // Hermetic server: no devtools (empty HOME/COMPACT_DIRECTORY), no
+    // formatter override, no PATH to find one on.
+    let fake_home = temp.path().join("home");
+    std::fs::create_dir_all(&fake_home).expect("fake home");
+    let fake_home = fake_home.to_string_lossy().into_owned();
+    let mut client = LspClient::start_with_env(&[
+        ("HOME", &fake_home),
+        ("COMPACT_DIRECTORY", ""),
+        ("COMPACT_FORMATTER", ""),
+        ("COMPACT_COMPILER", ""),
+        ("PATH", "/nonexistent"),
+    ]);
+    initialize(&mut client, &root_uri);
+    open_and_wait(&mut client, &uri, SOURCE);
+
+    let formatting = client.request(
+        "textDocument/formatting",
+        json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }),
+    );
+    assert!(
+        formatting.pointer("/result").is_none_or(Value::is_null),
+        "formatting should degrade to null: {formatting}"
+    );
+
+    let range = client.request(
+        "textDocument/rangeFormatting",
+        json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 4, "character": 1 }
+            },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }),
+    );
+    assert!(
+        range.pointer("/result").is_none_or(Value::is_null),
+        "range formatting should degrade to null: {range}"
+    );
+
+    // The server keeps serving requests.
+    let response = client.request("workspace/symbol", json!({ "query": "" }));
+    assert!(response.get("result").is_some(), "{response}");
+
+    client.shutdown();
+}
+
 #[test]
 fn test_semantic_tokens_map_back_to_source() {
     let temp = tempfile::tempdir().expect("tempdir");
