@@ -180,9 +180,12 @@ cargo test
 ```
 
 GitHub Actions runs these on `main` and `dev`, plus a `compiler-probe` **matrix** over toolchains
-**0.31.1, 0.34.0, and 0.35.0** that runs the registry probe tests against each (they skip themselves
-when no compiler is present). The end-to-end LSP tests spawn the server binary and speak JSON-RPC
-over stdio.
+**0.31.1, 0.34.0, and 0.35.0** that installs each toolchain and runs the **full** suite with
+`COMPACT_LSP_REQUIRE_COMPILER=1` / `COMPACT_LSP_REQUIRE_FORMATTER=1` (a missing toolchain fails
+instead of skipping), and a report-only **coverage** job (`cargo llvm-cov`). The end-to-end LSP
+tests spawn the server binary, speak JSON-RPC over stdio, and are backed by compiler-validated
+fixture projects; see [TESTING.md](./TESTING.md) for the layers, snapshots, property tests, and
+known issues.
 
 - **Testing** — see [TESTING.md](./TESTING.md) for the test layers, fixtures, snapshots, and known issues.
 - **Changelog** — see [`CHANGELOG.md`](./CHANGELOG.md) for release notes.

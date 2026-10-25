@@ -38,13 +38,25 @@ This is a self-contained git repository. The `CLAUDE.md` in the parent `midnight
 
 ```bash
 cargo build --release          # Binary at target/release/compact-lsp
-cargo test                     # Run all tests (110+ unit/integration tests)
+cargo test                     # All tests (~280; compiler-backed tests skip without a toolchain)
 cargo test <name>              # Run a single test by name substring
+cargo test -- --ignored        # Known-issue acceptance tests (expected to fail)
 cargo fmt --all --check        # CI fails if not formatted
 cargo clippy --all-targets --all-features -- -D warnings  # CI fails on any warning
 ```
 
-CI (`.github/workflows/ci.yml`) runs fmt-check, clippy (warnings-as-errors), build, and test. Match all four locally before pushing. Edition 2024, `max_width = 100` (`rustfmt.toml`).
+CI (`.github/workflows/ci.yml`) runs fmt-check, clippy (warnings-as-errors), build, and test
+(**Check**), a **Coverage** job (`cargo llvm-cov`, report-only), and the **compiler-probe** matrix
+(0.31.1/0.34.0/0.35.0) which installs each toolchain and runs the *full* suite with
+`COMPACT_LSP_REQUIRE_COMPILER=1`/`COMPACT_LSP_REQUIRE_FORMATTER=1` (a missing toolchain fails
+instead of skipping). Match all four gates locally before pushing. Edition 2024, `max_width = 100`
+(`rustfmt.toml`).
+
+The test strategy is documented in `TESTING.md`: unit / end-to-end / compiler-backed layers,
+fixtures + `expected.toml`, insta snapshots, proptest properties, seeded mutation fuzzing, and the
+known issues pinned as `#[ignore]`d acceptance tests. End-to-end suites share the harness in
+`crates/compact-lsp/tests/common/mod.rs`; new e2e tests should use it (notably `open_and_wait`, so a
+request cannot race an unfinished `didOpen`).
 
 ### Debugging
 

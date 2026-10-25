@@ -12,6 +12,36 @@ Fixture projects live in `crates/compact-lsp/tests/fixtures/` and are
 calibrated against toolchains 0.31.1 / 0.34.0 / 0.35.0; the expected outcomes
 are recorded in `fixtures/expected.toml`.
 
+The end-to-end suites share a harness (`tests/common/mod.rs`): spawn the
+binary, `open`/`open_and_wait` (waits for the first `publishDiagnostics` so
+requests never race the notification), `change`/`change_range`/`change_full`,
+`save`, `close`, `wait_for_diagnostics`, `assert_no_diagnostics_for`,
+`apply_text_edit(s)`, `apply_workspace_edit_to_disk`, `wait_for_exit`, and an
+environment-controlled `start_with_env`.
+
+## CI
+
+`ci.yml` runs three jobs on `main` and `dev`:
+
+- **Check** — fmt, clippy `-D warnings`, release build, full test suite
+  (compiler-backed tests skip; the hermetic formatter test still runs).
+- **Compiler probe** (`0.31.1`, `0.34.0`, `0.35.0`) — installs the toolchain,
+  runs the analyzer registry probes, then the full suite with
+  `COMPACT_LSP_REQUIRE_COMPILER=1` and `COMPACT_LSP_REQUIRE_FORMATTER=1`, so
+  those legs cannot pass without exercising the real binaries.
+- **Coverage** — `cargo llvm-cov` (lcov artifact, report-only for now).
+
+## Property tests and fuzzing
+
+- [proptest](https://proptest-rs.github.io/proptest/) properties cover the
+  formatting line diff (lossless roundtrip, ordered/disjoint edits, selection
+  invariants), the text-based base parsers, and semantic-token encoding
+  (never panics, sorted roundtrip).
+- `parser/fuzz_tests.rs` runs a deterministic seeded mutation fuzz over a
+  Compact corpus (structural characters, non-ASCII, truncation, insertion)
+  through every `ParserEngine` entry point: the assertion is that nothing
+  panics, so failures are always reproducible.
+
 ## Running locally
 
 ```bash
