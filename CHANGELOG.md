@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-25
+
 ### Fixed
 - **Renaming an enum type now updates its member-access bases.** `textDocument/rename` on
   `enum TokenStatus` rewrites `TokenStatus.paused` / `TokenStatus.active` too, so the project keeps

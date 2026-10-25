@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "compact-analyzer"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "ls-types",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "compact-lsp"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "compact-analyzer",
