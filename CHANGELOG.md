@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
 ### Added
 - **Method-call bases** for contract references: `factory.create().transfer(...)` resolves the
   receiver's contract type and reads the called circuit's declared return type, and
