@@ -1,0 +1,72 @@
+# Expected compiler outcomes for the fixture corpus.
+#
+# Consumed by `tests/compiler_fixtures.rs`, which copies the corpus to a temp
+# directory, compiles every listed file with the detected compiler (through
+# `compact_analyzer::DiagnosticEngine`, so feature flags are applied exactly as
+# the server applies them), and asserts the outcome below.
+#
+# `line`/`character` are 0-indexed LSP positions. `message_contains` is matched
+# case-sensitively against the diagnostic message.
+
+# Files that must compile with zero diagnostics on every supported toolchain.
+compiles = [
+  "portable/token.compact",
+  "portable/lib.compact",
+  "portable/imports_plain.compact",
+  "portable/imports_prefix.compact",
+  "portable/imports_selective.compact",
+  "portable/messy.compact",
+  "unicode/comments.compact",
+]
+
+# Files that must fail on every supported toolchain, with a stable message.
+[[fails]]
+file = "broken/parse_error.compact"
+line = 4
+character = 0
+message_contains = "parse error"
+
+[[fails]]
+file = "broken/type_error.compact"
+line = 6
+character = 9
+message_contains = "expected first argument of increment to have type Uint<16> but received Uint<64>"
+
+[[fails]]
+file = "broken/unbound_id.compact"
+line = 4
+character = 9
+message_contains = "unbound identifier noSuchCircuit"
+
+[[fails]]
+file = "broken/bad_import.compact"
+line = 1
+character = 0
+message_contains = 'failed to locate file "./does_not_exist.compact"'
+
+# Files whose outcome depends on the compiler's language version.
+#
+#   language >= min_language_version  -> must match `above`
+#   language <  min_language_version  -> must match `below`
+#
+# `above`/`below` are "compiles" or "fails"; `below_message_contains` is an
+# optional substring for the below-threshold failure.
+
+[[gated]]
+file = "crossfile/token.compact"
+min_language_version = "0.26.0"
+above = "compiles"
+below = "fails"
+
+[[gated]]
+file = "crossfile/caller.compact"
+min_language_version = "0.26.0"
+above = "compiles"
+below = "fails"
+
+[[gated]]
+file = "toolchain/newer_symbols.compact"
+min_language_version = "0.26.103"
+above = "compiles"
+below = "fails"
+below_message_contains = "unbound identifier sha512"
