@@ -75,3 +75,6 @@ tree-sitter-compact = "0.3.0"
 
 # Snapshot (golden-file) testing for end-to-end feature output
 insta = { version = "1", features = ["json"] }
+
+# Property-based testing for parser/formatting helpers
+proptest = "1"

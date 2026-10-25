@@ -158,3 +158,29 @@ fn test_return_type_of_signature() {
     assert_eq!(return_type_of_signature("no return here"), None);
     assert_eq!(return_type_of_signature("(a): "), None);
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    /// None of the text-based base parsers may panic on arbitrary input.
+    #[test]
+    fn prop_base_helpers_never_panic(text in "(?s).*") {
+        let _ = split_callable_type_args(&text);
+        let _ = split_type_args(&text);
+        let _ = parse_base_text(&text);
+        let _ = split_top_level_args(&text);
+        let _ = generic_args(&text);
+        let _ = return_type_of_signature(&text);
+        let _ = element_type(&text);
+        let _ = matching_open(&text, '(', ')');
+    }
+
+    /// A dotted identifier path parses back into its segments.
+    #[test]
+    fn prop_parse_base_text_paths(
+        segments in prop::collection::vec("[a-zA-Z_][a-zA-Z0-9_]{0,6}", 1..5),
+    ) {
+        let text = segments.join(".");
+        prop_assert_eq!(parse_base_text(&text), MemberBase::Path(segments));
+    }
+}

@@ -48,3 +48,4 @@ compact-analyzer = { path = "../compact-analyzer", version = "0.6.0" }
 
 [dev-dependencies]
 insta.workspace = true
+proptest.workspace = true

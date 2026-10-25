@@ -3,6 +3,7 @@
 use super::*;
 
 /// A line-range replacement: original lines `[start, end)` become `replacement`.
+#[derive(Debug)]
 pub(super) struct LineEdit {
     pub(super) start: usize,
     pub(super) end: usize,
@@ -112,6 +113,10 @@ pub(super) fn line_edits(original: &[&str], formatted: &[&str]) -> Vec<LineEdit>
 /// Whole-file formatting edits filtered to those intersecting the selected
 /// inclusive line range `[sel_start, sel_end]`. Newlines are re-added because
 /// each [`TextEdit`] spans whole lines (start/end at column 0).
+///
+/// A diff group that straddles the selection boundary is kept in full (the
+/// line mapping inside a group is ambiguous), so a neighbouring unselected
+/// line sharing that group can also change.
 pub(super) fn range_format_edits(
     original: &str,
     formatted: &str,

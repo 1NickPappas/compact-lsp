@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Range (selection) formatting**: `textDocument/rangeFormatting` is now supported. Since
   `format-compact` only formats whole files, the document is formatted in full and a line-level diff
-  is filtered to the changes intersecting the selected range, so unselected code is untouched.
+  is filtered to the edit groups intersecting the selected range. Edit groups that straddle the
+  selection are applied in full, so a neighbouring line that shares a diff group can also change;
+  everything outside every kept group is untouched.
 - **Explicit call-site type arguments**: generic calls written as `id<Uint<64>>(x)` (the form
   Compact *requires* — it does not infer generic arguments) now bind the type parameters directly,
   covering parameters that argument inference cannot bind: nested (`first<T>(m: Maybe<T>)`) and

@@ -59,4 +59,7 @@ impl Default for ParserEngine {
 }
 
 #[cfg(test)]
+mod fuzz_tests;
+
+#[cfg(test)]
 mod tests;

@@ -222,3 +222,98 @@ fn test_range_format_edits_outside_changes_is_empty() {
     let edits = range_format_edits(ORIGINAL, FORMATTED, 0, 0);
     assert!(edits.is_empty(), "unexpected edits: {edits:?}");
 }
+
+use proptest::prelude::*;
+
+proptest! {
+    /// The line diff must be lossless: replaying it has to reconstruct the
+    /// formatted text exactly, including when the size guard collapses to a
+    /// single block replacement.
+    #[test]
+    fn prop_line_edits_roundtrip(original in "(?s).*", formatted in "(?s).*") {
+        let orig: Vec<&str> = original.split('\n').collect();
+        let fmt: Vec<&str> = formatted.split('\n').collect();
+        let edits = line_edits(&orig, &fmt);
+        prop_assert_eq!(apply_line_edits(&original, &edits), formatted);
+    }
+
+    /// Edits are independent and ordered, so any subset can be applied.
+    #[test]
+    fn prop_line_edits_are_disjoint_and_ordered(original in "(?s).*", formatted in "(?s).*") {
+        let orig: Vec<&str> = original.split('\n').collect();
+        let fmt: Vec<&str> = formatted.split('\n').collect();
+        let edits = line_edits(&orig, &fmt);
+        for pair in edits.windows(2) {
+            prop_assert!(pair[0].end <= pair[1].start, "edits overlap: {pair:?}");
+        }
+    }
+
+    /// Range formatting only keeps edit groups that intersect the selection;
+    /// text outside every kept group is unchanged. A group that straddles the
+    /// selection is applied in full (pinned by
+    /// `test_range_format_straddling_group_applies_in_full`).
+    #[test]
+    fn prop_range_format_outside_selection_is_unchanged(
+        original in "(?s).*",
+        formatted in "(?s).*",
+        start in 0u32..8,
+        end in 0u32..8,
+    ) {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let edits = range_format_edits(&original, &formatted, start, end);
+        let applied = apply_text_edits(&original, &edits);
+
+        for edit in &edits {
+            let intersects = edit.range.start.line <= end && edit.range.end.line > start;
+            prop_assert!(intersects, "edit does not intersect selection: {edit:?}");
+        }
+
+        let Some(kept_start) = edits.iter().map(|e| e.range.start.line).min() else {
+            prop_assert_eq!(applied, original);
+            return Ok(());
+        };
+        let kept_end = edits.iter().map(|e| e.range.end.line).max().unwrap();
+        let delta: i64 = edits
+            .iter()
+            .map(|edit| {
+                let replacement_lines = if edit.new_text.is_empty() {
+                    0
+                } else {
+                    edit.new_text
+                        .strip_suffix('\n')
+                        .unwrap_or(&edit.new_text)
+                        .split('\n')
+                        .count() as i64
+                };
+                replacement_lines - (edit.range.end.line - edit.range.start.line) as i64
+            })
+            .sum();
+
+        let orig_lines: Vec<&str> = original.split('\n').collect();
+        let applied_lines: Vec<&str> = applied.split('\n').collect();
+        for (i, orig_line) in orig_lines.iter().enumerate() {
+            let i = i as i64;
+            let applied_index = if i < kept_start as i64 {
+                Some(i)
+            } else if i >= kept_end as i64 {
+                Some(i + delta)
+            } else {
+                None
+            };
+            let Some(j) = applied_index else { continue };
+            if j < 0 || j as usize >= applied_lines.len() {
+                continue;
+            }
+            prop_assert_eq!(applied_lines[j as usize], *orig_line, "line {} changed", i);
+        }
+    }
+}
+
+#[test]
+fn test_range_format_straddling_group_applies_in_full() {
+    // The whole-document diff is one group; selecting only line 1 keeps it and
+    // therefore also rewrites line 0. Pinned so the trade-off is explicit.
+    let edits = range_format_edits("\n", " ", 1, 1);
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert_eq!(apply_text_edits("\n", &edits), " ");
+}
