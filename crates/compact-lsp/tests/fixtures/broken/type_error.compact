@@ -1,0 +1,8 @@
+// Broken fixture: `Counter.increment` takes Uint<16>, not Uint<64>.
+import CompactStandardLibrary;
+
+export ledger counter: Counter;
+
+export circuit bump(): [] {
+  counter.increment(0 as Uint<64>);
+}

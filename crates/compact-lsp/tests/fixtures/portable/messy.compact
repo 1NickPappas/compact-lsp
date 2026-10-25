@@ -1,0 +1,18 @@
+// Deliberately messy but valid source, used by the formatting tests.
+import CompactStandardLibrary;
+
+
+export   enum   Color { red,   green, blue }
+
+export struct  Pair  {
+  left:   Uint<8>,
+      right:  Uint<8>
+}
+
+export circuit  sum( p :  Pair ): Uint<16> {
+  return   p.left + p.right;
+}
+
+export circuit pick( c : Color ): Uint<8> {
+  return c == Color.red ? 0 : (c == Color.green ? 1 : 2);
+}

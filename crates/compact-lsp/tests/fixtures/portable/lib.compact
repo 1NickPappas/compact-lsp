@@ -1,0 +1,15 @@
+// Portable library fixture: a single module imported by the other files.
+module lib {
+  export struct Order {
+    id: Uint<64>,
+    amount: Uint<64>,
+  }
+
+  export circuit total(order: Order): Uint<64> {
+    return order.amount;
+  }
+
+  export circuit identity<T>(value: T): T {
+    return value;
+  }
+}

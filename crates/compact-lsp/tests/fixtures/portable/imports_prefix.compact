@@ -1,0 +1,7 @@
+// Prefixed relative import: module exports are reachable as `Lib_<name>`.
+import CompactStandardLibrary;
+import "./lib" prefix Lib_;
+
+export circuit prefixedTotal(order: Lib_Order): Uint<64> {
+  return Lib_total(order);
+}

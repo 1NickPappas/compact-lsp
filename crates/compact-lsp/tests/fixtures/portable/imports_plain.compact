@@ -1,0 +1,7 @@
+// Plain relative import of a module: exported names are unqualified.
+import CompactStandardLibrary;
+import "./lib";
+
+export circuit orderTotal(order: Order): Uint<64> {
+  return total(order);
+}

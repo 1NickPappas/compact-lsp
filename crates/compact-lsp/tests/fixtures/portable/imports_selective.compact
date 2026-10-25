@@ -1,0 +1,7 @@
+// Selective import: only `Order` and `total` (aliased) are brought in.
+import CompactStandardLibrary;
+import { Order, total as totalOf } from "./lib";
+
+export circuit selectiveTotal(order: Order): Uint<64> {
+  return totalOf(order);
+}

@@ -1,0 +1,9 @@
+// Cross-contract interface. Requires language >= 0.26 (toolchain 0.34+).
+module token {
+  import CompactStandardLibrary;
+
+  export contract Token {
+    circuit transfer(to: UserAddress, amount: Uint<64>): Boolean;
+    circuit balanceOf(owner: UserAddress): Uint<64>;
+  }
+}

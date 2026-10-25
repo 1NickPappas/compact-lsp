@@ -1,0 +1,6 @@
+// Broken fixture: `noSuchCircuit` is never declared.
+import CompactStandardLibrary;
+
+export circuit useMissing(): Uint<64> {
+  return noSuchCircuit(1);
+}

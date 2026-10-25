@@ -1,0 +1,4 @@
+// Broken fixture: unterminated circuit body (parse error).
+import CompactStandardLibrary;
+
+export circuit broken( {

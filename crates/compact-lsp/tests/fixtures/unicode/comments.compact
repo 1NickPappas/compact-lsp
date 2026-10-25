@@ -1,0 +1,19 @@
+// Portable fixture with non-ASCII text: 😀 emoji, 日本語, café.
+import CompactStandardLibrary;
+
+// 🚀 comment before a declaration with an emoji.
+export enum Mood {
+  happy,
+  sad,
+}
+
+// Accented comment: résumé — the struct below follows it.
+export struct Greeting {
+  message: Bytes<32>,
+  mood: Mood,
+}
+
+// 日本語のコメント。
+export circuit greet(): Greeting {
+  return Greeting { message: pad(32, "hi"), mood: Mood.happy };
+}

@@ -1,0 +1,6 @@
+// Broken fixture: the imported file does not exist.
+import "./does_not_exist";
+
+export circuit noop(): [] {
+  return [];
+}

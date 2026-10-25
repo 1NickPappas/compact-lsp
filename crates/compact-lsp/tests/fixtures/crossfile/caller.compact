@@ -1,0 +1,9 @@
+// Cross-contract call into the imported `Token` interface. The parameter is
+// disclosed because passing a contract reference to a ledger operation
+// requires disclosure.
+import CompactStandardLibrary;
+import "./token";
+
+export circuit transferTo(ref: Token, to: UserAddress, amount: Uint<64>): Boolean {
+  return disclose(ref).transfer(disclose(to), disclose(amount));
+}

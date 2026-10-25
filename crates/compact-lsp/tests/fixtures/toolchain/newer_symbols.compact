@@ -1,0 +1,7 @@
+// Version-gated fixture: `sha512` was added in language 0.26.103, so this
+// file must fail to compile on the mainnet pin and succeed on newer toolchains.
+import CompactStandardLibrary;
+
+export circuit hashIt(x: Field): Bytes<64> {
+  return sha512<Field>(x);
+}

@@ -1,0 +1,52 @@
+// Portable token fixture: must compile on toolchains 0.31.1 through 0.35.0.
+import CompactStandardLibrary;
+
+export enum TokenStatus {
+  active,
+  paused,
+}
+
+export struct TokenInfo {
+  name: Bytes<32>,
+  decimals: Uint<8>,
+}
+
+type Amount = Uint<16>;
+new type Cents = Uint<16>;
+
+export ledger totalSupply: Counter;
+export ledger balances: Map<UserAddress, Uint<64>>;
+
+witness getSecret(): Bytes<32>;
+
+constructor() {
+  totalSupply.increment(1);
+}
+
+export circuit mintTokens(amount: Uint<16>): [] {
+  totalSupply.increment(disclose(amount));
+}
+
+export circuit statusOf(info: TokenInfo): TokenStatus {
+  return info.decimals == 0 ? TokenStatus.paused : TokenStatus.active;
+}
+
+export circuit revealSecret(): Bytes<32> {
+  return disclose(getSecret());
+}
+
+export circuit balanceFor(owner: UserAddress): Uint<64> {
+  return balances.lookup(disclose(owner));
+}
+
+export circuit charge(amount: Amount): Uint<16> {
+  return amount;
+}
+
+export circuit centsToUint(cents: Cents): Uint<16> {
+  return cents as Uint<16>;
+}
+
+circuit identity<T>(value: T): T {
+  return value;
+}
