@@ -264,7 +264,15 @@ proptest! {
         let applied = apply_text_edits(&original, &edits);
 
         for edit in &edits {
-            let intersects = edit.range.start.line <= end && edit.range.end.line > start;
+            let line = edit.range.start.line;
+            let end_line = edit.range.end.line;
+            // A zero-length edit is an insertion anchored between lines: the
+            // server keeps it when its anchor is inside the selection.
+            let intersects = if line == end_line {
+                line >= start && line <= end
+            } else {
+                line <= end && end_line > start
+            };
             prop_assert!(intersects, "edit does not intersect selection: {edit:?}");
         }
 
@@ -316,4 +324,13 @@ fn test_range_format_straddling_group_applies_in_full() {
     let edits = range_format_edits("\n", " ", 1, 1);
     assert_eq!(edits.len(), 1, "{edits:?}");
     assert_eq!(apply_text_edits("\n", &edits), " ");
+}
+
+/// Regression: a whole-document diff can be a pure insertion at the first
+/// line; a selection on that line keeps the insertion and drops the rest.
+#[test]
+fn test_range_format_pure_insertion_at_selection() {
+    let edits = range_format_edits("\n¡", "¢\0\n", 0, 0);
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert_eq!(apply_text_edits("\n¡", &edits), "¢\0\n\n¡");
 }
