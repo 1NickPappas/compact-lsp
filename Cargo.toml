@@ -72,3 +72,6 @@ toml = "1"
 # dependency on the archived midnightntwrk/compact-tree-sitter repo.
 tree-sitter = "0.27"
 tree-sitter-compact = "0.3.0"
+
+# Snapshot (golden-file) testing for end-to-end feature output
+insta = { version = "1", features = ["json"] }
