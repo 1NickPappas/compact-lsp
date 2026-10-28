@@ -6,6 +6,7 @@ license.workspace = true
 description = "Analysis engines (diagnostics, formatter, tree-sitter parser) for the Compact smart contract language"
 repository.workspace = true
 homepage.workspace = true
+readme.workspace = true
 
 # This is a library crate (not a binary)
 [lib]

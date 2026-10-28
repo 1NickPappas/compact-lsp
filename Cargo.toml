@@ -22,6 +22,7 @@ homepage = "https://github.com/1NickPappas/compact-lsp"
 keywords = ["lsp", "language-server", "compact", "smart-contracts", "midnight"]
 categories = ["development-tools", "text-editors"]
 rust-version = "1.90"
+readme = "README.md"
 
 # Shared dependencies - crates can use these with `.workspace = true`
 # This ensures all crates use the same versions, avoiding conflicts.
